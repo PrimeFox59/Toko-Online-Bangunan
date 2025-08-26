@@ -10,8 +10,8 @@ import plotly.express as px
 from google.oauth2.service_account import Credentials
 import gspread
 
-# Placeholder for user to add their sheet name
-GOOGLE_SHEET_NAME = "PT. BERKAT KARYA ANUGERAH"
+# --- PENTING: Ganti "YOUR_GOOGLE_SHEET_NAME" dengan nama Google Sheet Anda ---
+GOOGLE_SHEET_NAME = "PT. BERKAT KARYA ANUGERAH" 
 
 # --- REQUIRED: Define the scope for Google Sheets API ---
 scope = [
@@ -29,7 +29,7 @@ def get_client():
         return client
     except Exception as e:
         st.error(f"Error saat otentikasi Google Sheets: {e}.")
-        st.info("Pastikan Anda telah mengonfigurasi `gcp_service_account` di Streamlit secrets. Mode Google Sheets tidak akan berfungsi.")
+        st.info("Pastikan Anda telah mengonfigurasi `gcp_service_account` di Streamlit secrets dan membagikan sheet Anda.")
         return None
 
 # --- CUSTOM CSS FOR UI/UX IMPROVEMENTS ---
@@ -78,8 +78,11 @@ def get_data_from_sheet(sheet_name):
             data = sheet.get_all_records()
             df = pd.DataFrame(data)
             return df
+        except gspread.WorksheetNotFound:
+            st.warning(f"Lembar kerja '{sheet_name}' tidak ditemukan. Silakan buat lembar kerja ini di Google Sheets Anda.")
+            return pd.DataFrame()
         except Exception as e:
-            st.error(f"Error saat membaca data dari sheet '{sheet_name}'. Pastikan sheet dengan nama tersebut ada. Error: {e}")
+            st.error(f"Error saat membaca data dari sheet '{sheet_name}': {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -125,6 +128,9 @@ def delete_sheet_row(sheet_name, row_index):
 # --- Authentication & Initial Setup ---
 def check_login(username, password):
     users_df = get_data_from_sheet('users')
+    if users_df.empty:
+        return False
+    
     user_row = users_df[users_df['username'] == username]
     if not user_row.empty:
         hashed_password = user_row.iloc[0]['password_hash'].encode('utf-8')
@@ -132,41 +138,48 @@ def check_login(username, password):
     return False
 
 def init_app_state():
-    # Only need to check for the 'owner' user, the sheets are assumed to exist
+    # Cek apakah lembar kerja 'users' ada dan memiliki data
     users_df = get_data_from_sheet('users')
     
-    # Check if the 'users' sheet is empty or if the 'owner' user does not exist
-    if users_df.empty or 'owner' not in users_df['username'].tolist():
-        st.warning("Data sheet 'users' tidak ditemukan atau user 'owner' tidak ada. Mencoba membuat user 'owner'...")
-        hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt())
-        if write_to_sheet('users', ['owner', hashed_password.decode('utf-8')]):
-            st.success("User 'owner' dengan password 'owner123' berhasil ditambahkan. Silakan login.")
-            st.info("Anda mungkin perlu me-refresh halaman jika tidak ada tombol login.")
-        else:
-            st.error("Gagal menambahkan user 'owner'. Mohon periksa kembali konfigurasi Google Sheets.")
-
-    # Check if the existing owner's password hash is valid
-    else:
-        owner_row = users_df[users_df['username'] == 'owner']
-        if not owner_row.empty:
-            hashed_password = owner_row.iloc[0]['password_hash']
+    # Jika users_df kosong, cek apakah sheetnya ada tapi kosong, atau tidak ada sama sekali.
+    if users_df.empty:
+        client = get_client()
+        if client:
             try:
-                # Validate the hash by trying to decode it
-                if not isinstance(hashed_password, str) or not hashed_password.startswith('$2'):
-                    st.warning("Password hash untuk user 'owner' tidak valid. Mencoba membuat ulang...")
-                    hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt())
-                    
-                    # Update the existing row instead of adding a new one
-                    row_index = owner_row.index[0]
-                    client = get_client()
-                    if client:
-                        sheet = client.open(GOOGLE_SHEET_NAME).worksheet('users')
-                        sheet.update(f'B{row_index+2}', hashed_password.decode('utf-8'))
-                        st.success("Password hash user 'owner' berhasil diperbarui.")
-                    else:
-                        st.error("Gagal memperbarui password hash. Tidak dapat terhubung ke Google Sheets.")
+                client.open(GOOGLE_SHEET_NAME).worksheet('users')
+                # Jika sheet 'users' ada tapi kosong, tambahkan user 'owner'
+                st.warning("Lembar kerja 'users' kosong. Mencoba menambahkan user 'owner'...")
+                hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt())
+                if write_to_sheet('users', ['owner', hashed_password.decode('utf-8')]):
+                    st.success("User 'owner' dengan password 'owner123' berhasil ditambahkan. Silakan login.")
+                else:
+                    st.error("Gagal menambahkan user 'owner'. Mohon periksa kembali konfigurasi Google Sheets.")
+            except gspread.WorksheetNotFound:
+                st.error("Lembar kerja 'users' tidak ditemukan. Aplikasi tidak akan berfungsi.")
             except Exception as e:
-                st.error(f"Terjadi kesalahan saat validasi hash: {e}")
+                st.error(f"Terjadi kesalahan saat memeriksa sheet 'users': {e}")
+    else:
+        # Jika sheet 'users' sudah ada, cek apakah user 'owner' sudah ada
+        if 'owner' not in users_df['username'].tolist():
+            st.warning("User 'owner' tidak ditemukan. Mencoba menambahkan...")
+            hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt())
+            if write_to_sheet('users', ['owner', hashed_password.decode('utf-8')]):
+                st.success("User 'owner' dengan password 'owner123' berhasil ditambahkan.")
+            else:
+                st.error("Gagal menambahkan user 'owner'.")
+        else:
+            # Jika user 'owner' sudah ada, pastikan hash password-nya valid
+            owner_row = users_df[users_df['username'] == 'owner']
+            if not owner_row.empty:
+                hashed_password_from_sheet = owner_row.iloc[0]['password_hash']
+                try:
+                    if not isinstance(hashed_password_from_sheet, str) or not hashed_password_from_sheet.startswith('$2'):
+                        st.warning("Password hash untuk user 'owner' tidak valid. Mencoba membuat ulang...")
+                        new_hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt())
+                        row_index = owner_row.index[0]
+                        update_sheet_row('users', row_index, ['owner', new_hashed_password.decode('utf-8')])
+                except Exception as e:
+                    st.error(f"Terjadi kesalahan saat validasi hash: {e}")
 
 # --- CRUD Functions - Inventory (using sheets) ---
 def add_master_item(kode, supplier, nama, warna, rak, harga):
@@ -1081,4 +1094,3 @@ def main():
 if __name__ == "__main__":
     init_app_state()
     main()
-

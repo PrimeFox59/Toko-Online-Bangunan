@@ -11,7 +11,13 @@ from google.oauth2.service_account import Credentials
 import gspread
 
 # Placeholder for user to add their sheet name
-GOOGLE_SHEET_NAME = "PT. BERKAT KARYA ANUGERAH"
+GOOGLE_SHEET_NAME = "YOUR_GOOGLE_SHEET_NAME"
+
+# --- REQUIRED: Define the scope for Google Sheets API ---
+scope = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive'
+]
 
 def get_client():
     try:

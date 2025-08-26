@@ -11,7 +11,7 @@ from google.oauth2.service_account import Credentials
 import gspread
 
 # Placeholder for user to add their sheet name
-GOOGLE_SHEET_NAME = "YOUR_GOOGLE_SHEET_NAME"
+GOOGLE_SHEET_NAME = "PT. BERKAT KARYA ANUGERAH"
 
 # --- REQUIRED: Define the scope for Google Sheets API ---
 scope = [
@@ -1081,3 +1081,4 @@ def main():
 if __name__ == "__main__":
     init_app_state()
     main()
+

@@ -5,34 +5,16 @@ from fpdf import FPDF
 import io
 import bcrypt
 import plotly.express as px
-
-# --- Google Sheets Integration ---
-from google.oauth2.service_account import Credentials
 import gspread
+from google.oauth2.service_account import Credentials
 
-# --- PENTING: Ganti "YOUR_GOOGLE_SHEET_NAME" dengan nama Google Sheet Anda ---
-GOOGLE_SHEET_NAME = "PT. BERKAT KARYA ANUGERAH" 
+# --- Page Configuration & CSS ---
+st.set_page_config(
+    page_title="Sistem Kontrol Stok & Penggajian",
+    page_icon="📦",
+    layout="wide"
+)
 
-# --- REQUIRED: Define the scope for Google Sheets API ---
-scope = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive'
-]
-
-def get_client():
-    try:
-        # Gunakan st.secrets untuk otentikasi
-        creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"], scopes=scope
-        )
-        client = gspread.authorize(creds)
-        return client
-    except Exception as e:
-        st.error(f"Error saat otentikasi Google Sheets: {e}.")
-        st.info("Pastikan Anda telah mengonfigurasi `gcp_service_account` di Streamlit secrets dan membagikan sheet Anda.")
-        return None
-
-# --- CUSTOM CSS FOR UI/UX IMPROVEMENTS ---
 st.markdown("""
 <style>
     .reportview-container {
@@ -68,223 +50,217 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Database & Sheets Interaction Functions ---
-@st.cache_data(show_spinner=False)
-def get_data_from_sheet(sheet_name):
-    client = get_client()
-    if client:
+# --- Google Sheet Configuration ---
+try:
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    key_dict = st.secrets["gcp_service_account"]
+    creds = Credentials.from_service_account_info(key_dict, scopes=scope)
+    gc = gspread.authorize(creds)
+    # Ganti dengan ID Google Sheet Anda
+    SHEET_ID = st.secrets["sheet_id"]["sheet_id"]
+
+    def get_sheet(sheet_name):
+        """Helper function to get a worksheet by name."""
         try:
-            sheet = client.open(GOOGLE_SHEET_NAME).worksheet(sheet_name)
-            data = sheet.get_all_records()
-            df = pd.DataFrame(data)
-            return df
+            return gc.open_by_key(SHEET_ID).worksheet(sheet_name)
         except gspread.WorksheetNotFound:
-            st.warning(f"Lembar kerja '{sheet_name}' tidak ditemukan. Silakan buat lembar kerja ini di Google Sheets Anda.")
-            return pd.DataFrame()
-        except Exception as e:
-            st.error(f"Error saat membaca data dari sheet '{sheet_name}': {e}")
-            return pd.DataFrame()
+            st.error(f"Worksheet '{sheet_name}' not found. Please create it in your Google Sheet.")
+            return None
+except Exception as e:
+    st.error(f"Failed to connect to Google Sheets. Check your `st.secrets` configuration. Error: {e}")
+    st.stop()
+
+# --- Database Initialization Placeholder ---
+def init_db():
+    st.info("Using Google Sheets as database. Please ensure the following sheets exist with the correct headers: `users`, `master_barang`, `barang_masuk`, `barang_keluar`, `invoices`, `invoice_items`, `employees`, `payroll`.")
+    
+    # Check if 'owner' user exists, if not, create it
+    users_sheet = get_sheet('users')
+    if users_sheet:
+        users_df = pd.DataFrame(users_sheet.get_all_records())
+        if 'owner' not in users_df['username'].tolist():
+            hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            users_sheet.append_row(['owner', hashed_password])
+            st.success("Default user 'owner' created.")
+
+# --- Authentication ---
+def check_login(username, password):
+    users_sheet = get_sheet('users')
+    if users_sheet:
+        users_df = pd.DataFrame(users_sheet.get_all_records())
+        if 'username' in users_df.columns and username in users_df['username'].tolist():
+            user_row = users_df[users_df['username'] == username].iloc[0]
+            password_hash = user_row['password_hash'].encode('utf-8')
+            return bcrypt.checkpw(password.encode('utf-8'), password_hash)
+    return False
+
+# --- CRUD Functions - Inventory ---
+def get_master_barang():
+    sheet = get_sheet('master_barang')
+    if sheet:
+        data = sheet.get_all_records()
+        return pd.DataFrame(data)
     return pd.DataFrame()
 
-def write_to_sheet(sheet_name, data_list):
-    client = get_client()
-    if client:
-        try:
-            sheet = client.open(GOOGLE_SHEET_NAME).worksheet(sheet_name)
-            sheet.append_row(data_list)
-            st.cache_data.clear()
-            return True
-        except Exception as e:
-            st.error(f"Error saat menulis ke sheet '{sheet_name}'. Error: {e}")
-            return False
-    return False
-
-def update_sheet_row(sheet_name, row_index, data_list):
-    client = get_client()
-    if client:
-        try:
-            sheet = client.open(GOOGLE_SHEET_NAME).worksheet(sheet_name)
-            sheet.update(f'A{row_index+2}', [data_list]) # gspread update row is 1-indexed, headers are A1, so A2 is the first data row
-            st.cache_data.clear()
-            return True
-        except Exception as e:
-            st.error(f"Error saat memperbarui row di sheet '{sheet_name}'. Error: {e}")
-            return False
-    return False
-
-def delete_sheet_row(sheet_name, row_index):
-    client = get_client()
-    if client:
-        try:
-            sheet = client.open(GOOGLE_SHEET_NAME).worksheet(sheet_name)
-            sheet.delete_rows(row_index + 2) # gspread delete is 1-indexed, headers are A1, so A2 is the first data row
-            st.cache_data.clear()
-            return True
-        except Exception as e:
-            st.error(f"Error saat menghapus row di sheet '{sheet_name}'. Error: {e}")
-            return False
-    return False
-    
-# --- Authentication & Initial Setup ---
-def check_login(username, password):
-    users_df = get_data_from_sheet('users')
-    if users_df.empty:
-        return False
-    
-    user_row = users_df[users_df['username'] == username]
-    if not user_row.empty:
-        hashed_password = user_row.iloc[0]['password_hash'].encode('utf-8')
-        return bcrypt.checkpw(password.encode('utf-8'), hashed_password)
-    return False
-
-def init_app_state():
-    # Cek apakah lembar kerja 'users' ada dan memiliki data
-    users_df = get_data_from_sheet('users')
-    
-    # Jika users_df kosong, cek apakah sheetnya ada tapi kosong, atau tidak ada sama sekali.
-    if users_df.empty:
-        client = get_client()
-        if client:
-            try:
-                client.open(GOOGLE_SHEET_NAME).worksheet('users')
-                # Jika sheet 'users' ada tapi kosong, tambahkan user 'owner'
-                st.warning("Lembar kerja 'users' kosong. Mencoba menambahkan user 'owner'...")
-                hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt())
-                if write_to_sheet('users', ['owner', hashed_password.decode('utf-8')]):
-                    st.success("User 'owner' dengan password 'owner123' berhasil ditambahkan. Silakan login.")
-                else:
-                    st.error("Gagal menambahkan user 'owner'. Mohon periksa kembali konfigurasi Google Sheets.")
-            except gspread.WorksheetNotFound:
-                st.error("Lembar kerja 'users' tidak ditemukan. Aplikasi tidak akan berfungsi.")
-            except Exception as e:
-                st.error(f"Terjadi kesalahan saat memeriksa sheet 'users': {e}")
-    else:
-        # Jika sheet 'users' sudah ada, cek apakah user 'owner' sudah ada
-        if 'owner' not in users_df['username'].tolist():
-            st.warning("User 'owner' tidak ditemukan. Mencoba menambahkan...")
-            hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt())
-            if write_to_sheet('users', ['owner', hashed_password.decode('utf-8')]):
-                st.success("User 'owner' dengan password 'owner123' berhasil ditambahkan.")
-            else:
-                st.error("Gagal menambahkan user 'owner'.")
-        else:
-            # Jika user 'owner' sudah ada, pastikan hash password-nya valid
-            owner_row = users_df[users_df['username'] == 'owner']
-            if not owner_row.empty:
-                hashed_password_from_sheet = owner_row.iloc[0]['password_hash']
-                try:
-                    if not isinstance(hashed_password_from_sheet, str) or not hashed_password_from_sheet.startswith('$2'):
-                        st.warning("Password hash untuk user 'owner' tidak valid. Mencoba membuat ulang...")
-                        new_hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt())
-                        row_index = owner_row.index[0]
-                        update_sheet_row('users', row_index, ['owner', new_hashed_password.decode('utf-8')])
-                except Exception as e:
-                    st.error(f"Terjadi kesalahan saat validasi hash: {e}")
-
-# --- CRUD Functions - Inventory (using sheets) ---
 def add_master_item(kode, supplier, nama, warna, rak, harga):
-    master_df = get_data_from_sheet('master_barang')
-    if not master_df.empty and ((master_df['kode_bahan'] == kode) & (master_df['warna'] == warna)).any():
-        return False
-    return write_to_sheet('master_barang', [kode, supplier, nama, warna, rak, harga])
-
-def get_master_barang():
-    return get_data_from_sheet('master_barang')
+    sheet = get_sheet('master_barang')
+    if sheet:
+        existing_df = get_master_barang()
+        if not existing_df.empty and ((existing_df['kode_bahan'] == kode) & (existing_df['warna'] == warna)).any():
+            return False  # Duplicate found
+        
+        row = [kode, supplier, nama, warna, rak, harga]
+        sheet.append_row(row)
+        return True
+    return False
 
 def update_master_item(old_kode, old_warna, new_kode, new_warna, supplier, nama, rak, harga):
-    master_df = get_master_barang()
-    if (master_df['kode_bahan'] == old_kode).any() and (master_df['warna'] == old_warna).any():
-        row_index = master_df[(master_df['kode_bahan'] == old_kode) & (master_df['warna'] == old_warna)].index[0]
-        if (new_kode != old_kode or new_warna != old_warna):
-             if ((master_df['kode_bahan'] == new_kode) & (master_df['warna'] == new_warna)).any():
-                 return False
-        return update_sheet_row('master_barang', row_index, [new_kode, supplier, nama, new_warna, rak, harga])
+    sheet = get_sheet('master_barang')
+    if sheet:
+        df = get_master_barang()
+        if (df['kode_bahan'] == new_kode).any() and (df['warna'] == new_warna).any() and (new_kode != old_kode or new_warna != old_warna):
+            return False # New combo already exists
+        
+        try:
+            cell = sheet.find(old_kode)
+            row_index = cell.row
+            
+            # Find the correct row based on both kode and warna
+            all_records = sheet.get_all_records()
+            for idx, record in enumerate(all_records):
+                if record['kode_bahan'] == old_kode and record['warna'] == old_warna:
+                    row_index = idx + 2 # +1 for header, +1 for 0-index
+                    break
+            
+            if row_index > 0:
+                update_values = [new_kode, supplier, nama, new_warna, rak, harga]
+                sheet.update(f'A{row_index}:F{row_index}', [update_values])
+                return True
+        except gspread.exceptions.CellNotFound:
+            return False
     return False
 
 def delete_master_item(kode, warna):
-    master_df = get_master_barang()
-    if (master_df['kode_bahan'] == kode).any() and (master_df['warna'] == warna).any():
-        row_index = master_df[(master_df['kode_bahan'] == kode) & (master_df['warna'] == warna)].index[0]
-        return delete_sheet_row('master_barang', row_index)
-    return False
+    sheet = get_sheet('master_barang')
+    if sheet:
+        try:
+            # Find the row index to delete
+            all_records = sheet.get_all_records()
+            for idx, record in enumerate(all_records):
+                if record['kode_bahan'] == kode and record['warna'] == warna:
+                    sheet.delete_rows(idx + 2) # +2 because gspread is 1-indexed and has a header row
+                    return
+        except gspread.exceptions.CellNotFound:
+            pass
 
 def add_barang_masuk(tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
-    barang_masuk_df = get_data_from_sheet('barang_masuk')
-    new_id = barang_masuk_df['id'].max() + 1 if not barang_masuk_df.empty else 1
-    return write_to_sheet('barang_masuk', [new_id, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
+    sheet = get_sheet('barang_masuk')
+    if sheet:
+        row = [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan]
+        sheet.append_row(row)
 
 def get_barang_masuk():
-    return get_data_from_sheet('barang_masuk')
+    sheet = get_sheet('barang_masuk')
+    if sheet:
+        data = sheet.get_all_records()
+        return pd.DataFrame(data)
+    return pd.DataFrame()
 
-def update_barang_masuk(id, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
-    barang_masuk_df = get_barang_masuk()
-    if (barang_masuk_df['id'] == id).any():
-        row_index = barang_masuk_df[barang_masuk_df['id'] == id].index[0]
-        return update_sheet_row('barang_masuk', row_index, [id, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
+def update_barang_masuk(id_to_update, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
+    sheet = get_sheet('barang_masuk')
+    if sheet:
+        # Get all records to find the correct row_index
+        records = sheet.get_all_records()
+        df = pd.DataFrame(records)
+        if df.empty:
+            return False
+
+        # Assuming the first column is 'id' and is unique
+        try:
+            row_index_in_df = df[df['id'] == int(id_to_update)].index[0]
+            # gspread row index is 1-based and includes header row
+            gsheet_row_index = row_index_in_df + 2 
+            
+            update_values = [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan]
+            sheet.update(f'B{gsheet_row_index}:G{gsheet_row_index}', [update_values])
+            return True
+        except (IndexError, KeyError):
+            return False
     return False
 
-def delete_barang_masuk(id):
-    barang_masuk_df = get_barang_masuk()
-    if (barang_masuk_df['id'] == id).any():
-        row_index = barang_masuk_df[barang_masuk_df['id'] == id].index[0]
-        return delete_sheet_row('barang_masuk', row_index)
+def delete_barang_masuk(id_to_delete):
+    sheet = get_sheet('barang_masuk')
+    if sheet:
+        try:
+            records = sheet.get_all_records()
+            df = pd.DataFrame(records)
+            if df.empty:
+                return False
+
+            row_index_in_df = df[df['id'] == int(id_to_delete)].index[0]
+            gsheet_row_index = row_index_in_df + 2
+            sheet.delete_rows(gsheet_row_index)
+            return True
+        except (IndexError, KeyError):
+            return False
     return False
 
-@st.cache_data(ttl=600)
 def get_stock_balance(kode_bahan, warna):
-    barang_masuk_df = get_data_from_sheet('barang_masuk')
-    barang_keluar_df = get_data_from_sheet('barang_keluar')
+    masuk_df = get_barang_masuk()
+    keluar_df = get_barang_keluar()
     
-    in_stock = barang_masuk_df[(barang_masuk_df['kode_bahan'] == kode_bahan) & (barang_masuk_df['warna'] == warna)]['stok'].sum()
-    out_stock = barang_keluar_df[(barang_keluar_df['kode_bahan'] == kode_bahan) & (barang_keluar_df['warna'] == warna)]['stok'].sum()
-
+    in_stock = masuk_df[(masuk_df['kode_bahan'] == kode_bahan) & (masuk_df['warna'] == warna)]['stok'].sum()
+    out_stock = keluar_df[(keluar_df['kode_bahan'] == kode_bahan) & (keluar_df['warna'] == warna)]['stok'].sum()
+    
     return in_stock - out_stock
 
 def get_in_out_records(start_date, end_date):
-    in_df = get_data_from_sheet('barang_masuk')
-    out_df = get_data_from_sheet('barang_keluar')
-
-    if not in_df.empty:
-        in_df['tanggal_waktu'] = pd.to_datetime(in_df['tanggal_waktu']).dt.date.astype(str)
-        in_df = in_df[(in_df['tanggal_waktu'] >= start_date) & (in_df['tanggal_waktu'] <= end_date)]
-        in_df['qty'] = in_df['stok']
-        in_df['type'] = 'Masuk'
-    else:
-        in_df = pd.DataFrame(columns=['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan'])
+    in_df = get_barang_masuk()
+    out_df = get_barang_keluar()
     
-    if not out_df.empty:
-        out_df['tanggal_waktu'] = pd.to_datetime(out_df['tanggal_waktu']).dt.date.astype(str)
-        out_df = out_df[(out_df['tanggal_waktu'] >= start_date) & (out_df['tanggal_waktu'] <= end_date)]
-        out_df['qty'] = out_df['stok']
-        out_df['type'] = 'Keluar'
-    else:
-        out_df = pd.DataFrame(columns=['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan'])
-
-    df = pd.concat([in_df[['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan']], out_df[['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan']]], ignore_index=True)
+    in_df['type'] = 'Masuk'
+    out_df['type'] = 'Keluar'
+    
+    df = pd.concat([in_df, out_df], ignore_index=True)
+    
+    # Filter by date range
     df['tanggal_waktu'] = pd.to_datetime(df['tanggal_waktu'])
+    df = df[(df['tanggal_waktu'].dt.date >= start_date) & (df['tanggal_waktu'].dt.date <= end_date)]
     df = df.sort_values(by='tanggal_waktu')
+    
     return df
 
 # --- Invoice Functions ---
 def get_invoices():
-    df = get_data_from_sheet('invoices')
-    if not df.empty:
-        df['tanggal_waktu'] = pd.to_datetime(df['tanggal_waktu'])
-        df = df.sort_values(by='tanggal_waktu', ascending=False)
-    return df
+    sheet = get_sheet('invoices')
+    if sheet:
+        data = sheet.get_all_records()
+        return pd.DataFrame(data)
+    return pd.DataFrame()
 
 def get_invoice_items(invoice_number):
-    df = get_data_from_sheet('invoice_items')
-    return df[df['invoice_number'] == invoice_number]
+    sheet = get_sheet('invoice_items')
+    if sheet:
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+        return df[df['invoice_number'] == invoice_number]
+    return pd.DataFrame()
 
 def get_barang_keluar():
-    return get_data_from_sheet('barang_keluar')
-
+    sheet = get_sheet('barang_keluar')
+    if sheet:
+        data = sheet.get_all_records()
+        return pd.DataFrame(data)
+    return pd.DataFrame()
+    
 def generate_invoice_pdf(invoice_data, invoice_items):
+    # This function remains the same as it doesn't interact with the database
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
-    
     pdf.cell(0, 10, 'PT. BERKAT KARYA ANUGERAH', 0, 1, 'C')
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, 'INVOICE', 0, 1, 'C')
@@ -331,11 +307,14 @@ def generate_invoice_number():
     today_date = datetime.now().strftime('%y%m%d')
     prefix = f"INV-{today_date}-"
     
-    last_invoice = invoices_df[invoices_df['invoice_number'].str.startswith(prefix)]['invoice_number'].max()
-    
-    if pd.notna(last_invoice):
-        last_seq = int(last_invoice.split('-')[-1])
-        new_seq = last_seq + 1
+    if not invoices_df.empty:
+        last_invoice = invoices_df['invoice_number'].str.extract(f'{prefix}(\d{{3}})')
+        last_invoice.dropna(inplace=True)
+        if not last_invoice.empty:
+            last_seq = int(last_invoice[0].max())
+            new_seq = last_seq + 1
+        else:
+            new_seq = 1
     else:
         new_seq = 1
         
@@ -343,98 +322,230 @@ def generate_invoice_number():
     return new_invoice_number
 
 def add_barang_keluar_and_invoice(invoice_number, customer_name, items):
+    invoices_sheet = get_sheet('invoices')
+    invoice_items_sheet = get_sheet('invoice_items')
+    barang_keluar_sheet = get_sheet('barang_keluar')
+    
     tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    invoice_data_list = [invoice_number, tanggal_waktu, customer_name]
-    if not write_to_sheet('invoices', invoice_data_list):
-        return False, "Gagal mencatat invoice utama."
+    try:
+        # Check stock first to avoid half-complete transactions
+        for item in items:
+            current_stock = get_stock_balance(item['kode_bahan'], item['warna'])
+            if item['qty'] > current_stock:
+                return False, f"Stok untuk bahan {item['nama_bahan']} ({item['warna']}) tidak mencukupi. Stok saat ini: {current_stock}"
 
-    for item in items:
-        current_stock = get_stock_balance(item['kode_bahan'], item['warna'])
-        if item['qty'] > current_stock:
-            return False, f"Stok untuk bahan {item['nama_bahan']} ({item['warna']}) tidak mencukupi. Stok saat ini: {current_stock}"
+        # Insert into invoices table
+        invoices_sheet.append_row([invoice_number, tanggal_waktu, customer_name])
 
-        # Insert into invoice_items sheet
-        invoice_items_df = get_data_from_sheet('invoice_items')
-        new_item_id = invoice_items_df['id'].max() + 1 if not invoice_items_df.empty else 1
-        invoice_item_list = [new_item_id, invoice_number, item['kode_bahan'], item['nama_bahan'], item['qty'], item['harga'], item['total']]
-        if not write_to_sheet('invoice_items', invoice_item_list):
-            return False, "Gagal mencatat item invoice."
+        for item in items:
+            # Insert into invoice_items table
+            invoice_items_sheet.append_row([invoice_number, item['kode_bahan'], item['nama_bahan'], item['qty'], item['harga'], item['total']])
 
-        # Insert into barang_keluar sheet
-        barang_keluar_df = get_data_from_sheet('barang_keluar')
-        new_keluar_id = barang_keluar_df['id'].max() + 1 if not barang_keluar_df.empty else 1
-        keluar_data_list = [new_keluar_id, tanggal_waktu, item['kode_bahan'], item['warna'], item['qty'], item['yard'], item['keterangan']]
-        if not write_to_sheet('barang_keluar', keluar_data_list):
-            return False, "Gagal mencatat barang keluar."
-    
-    return True, "Transaksi berhasil dicatat dan invoice dibuat."
-
+            # Insert into barang_keluar table
+            barang_keluar_sheet.append_row([tanggal_waktu, item['kode_bahan'], item['warna'], item['qty'], item['yard'], item['keterangan']])
+        
+        return True, "Transaksi berhasil dicatat dan invoice dibuat."
+    except Exception as e:
+        return False, f"Error: {e}"
 
 # --- Payroll Functions ---
-def add_employee(nama, bagian, gaji):
-    employees_df = get_data_from_sheet('employees')
-    new_id = employees_df['id'].max() + 1 if not employees_df.empty else 1
-    return write_to_sheet('employees', [new_id, nama, bagian, gaji])
-
 def get_employees():
-    return get_data_from_sheet('employees')
+    sheet = get_sheet('employees')
+    if sheet:
+        data = sheet.get_all_records()
+        # Add an ID column as it's not present in gspread by default
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df['id'] = range(1, len(df) + 1)
+        return df
+    return pd.DataFrame()
+
+def add_employee(nama, bagian, gaji):
+    sheet = get_sheet('employees')
+    if sheet:
+        row = [nama, bagian, gaji]
+        sheet.append_row(row)
+        return True
+    return False
 
 def update_employee(employee_id, nama, bagian, gaji):
-    employees_df = get_employees()
-    if (employees_df['id'] == employee_id).any():
-        row_index = employees_df[employees_df['id'] == employee_id].index[0]
-        return update_sheet_row('employees', row_index, [employee_id, nama, bagian, gaji])
+    sheet = get_sheet('employees')
+    if sheet:
+        try:
+            # Find the row based on a unique identifier (nama_karyawan)
+            records = sheet.get_all_records()
+            for idx, record in enumerate(records):
+                if idx + 1 == employee_id:
+                    gsheet_row_index = idx + 2 # +2 for header and 1-based index
+                    update_values = [nama, bagian, gaji]
+                    sheet.update(f'A{gsheet_row_index}:C{gsheet_row_index}', [update_values])
+                    return True
+            return False
+        except gspread.exceptions.CellNotFound:
+            return False
     return False
 
 def delete_employee(employee_id):
-    employees_df = get_employees()
-    if (employees_df['id'] == employee_id).any():
-        row_index = employees_df[employees_df['id'] == employee_id].index[0]
-        return delete_sheet_row('employees', row_index)
+    sheet = get_sheet('employees')
+    if sheet:
+        try:
+            records = sheet.get_all_records()
+            for idx, record in enumerate(records):
+                if idx + 1 == employee_id:
+                    gsheet_row_index = idx + 2
+                    sheet.delete_rows(gsheet_row_index)
+                    return True
+            return False
+        except gspread.exceptions.CellNotFound:
+            return False
     return False
 
+
 def add_payroll_record(employee_id, gaji_bulan, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan):
-    payroll_df = get_data_from_sheet('payroll')
-    new_id = payroll_df['id'].max() + 1 if not payroll_df.empty else 1
-    tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    data_list = [new_id, tanggal_waktu, gaji_bulan, employee_id, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan]
-    return write_to_sheet('payroll', data_list)
+    sheet = get_sheet('payroll')
+    if sheet:
+        tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        row = [tanggal_waktu, gaji_bulan, employee_id, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan]
+        sheet.append_row(row)
+        return True
+    return False
 
 def get_payroll_records():
-    payroll_df = get_data_from_sheet('payroll')
-    employees_df = get_data_from_sheet('employees')
-
-    if payroll_df.empty or employees_df.empty:
-        return pd.DataFrame()
-
-    df = pd.merge(payroll_df, employees_df[['id', 'nama_karyawan']], left_on='employee_id', right_on='id', suffixes=('', '_emp'))
-    df = df.sort_values(by='tanggal_waktu', ascending=False)
-    return df[['id', 'tanggal_waktu', 'gaji_bulan', 'nama_karyawan', 'gaji_akhir', 'keterangan']]
+    payroll_sheet = get_sheet('payroll')
+    employees_df = get_employees()
+    
+    if payroll_sheet and not employees_df.empty:
+        payroll_df = pd.DataFrame(payroll_sheet.get_all_records())
+        if payroll_df.empty:
+            return pd.DataFrame()
+            
+        payroll_df['id'] = range(1, len(payroll_df) + 1)
+        payroll_df = pd.merge(payroll_df, employees_df[['id', 'nama_karyawan']], left_on='employee_id', right_on='id', how='left', suffixes=('', '_emp'))
+        payroll_df.drop(columns=['id_emp'], inplace=True)
+        return payroll_df
+    return pd.DataFrame()
 
 def get_payroll_records_by_month(month_str):
-    payroll_df = get_data_from_sheet('payroll')
-    employees_df = get_data_from_sheet('employees')
+    payroll_sheet = get_sheet('payroll')
+    employees_df = get_employees()
 
-    if payroll_df.empty or employees_df.empty:
-        return pd.DataFrame()
+    if payroll_sheet and not employees_df.empty:
+        payroll_df = pd.DataFrame(payroll_sheet.get_all_records())
+        if payroll_df.empty:
+            return pd.DataFrame()
 
-    df = pd.merge(payroll_df, employees_df, left_on='employee_id', right_on='id', suffixes=('', '_emp'))
-    df = df[df['gaji_bulan'] == month_str]
-    return df
+        payroll_df = pd.merge(payroll_df, employees_df[['id', 'nama_karyawan', 'bagian']], left_on='employee_id', right_on='id', how='left', suffixes=('', '_emp'))
+        payroll_df.drop(columns=['id_emp'], inplace=True)
+        return payroll_df[payroll_df['gaji_bulan'] == month_str]
+    return pd.DataFrame()
 
-# --- Helper function to get unique yards ---
-def get_unique_yards_for_item(kode_bahan, warna):
-    barang_masuk_df = get_data_from_sheet('barang_masuk')
-    barang_keluar_df = get_data_from_sheet('barang_keluar')
+def generate_payslips_pdf(payslip_df):
+    # This function remains the same as it doesn't interact with the database
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
     
-    yards_in = barang_masuk_df[(barang_masuk_df['kode_bahan'] == kode_bahan) & (barang_masuk_df['warna'] == warna)]['yard'].tolist()
-    yards_out = barang_keluar_df[(barang_keluar_df['kode_bahan'] == kode_bahan) & (barang_keluar_df['warna'] == warna)]['yard'].tolist()
-    
-    unique_yards = sorted(list(set(yards_in + yards_out)))
-    return unique_yards
+    for idx, row in payslip_df.iterrows():
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, 'PT. BERKAT KARYA ANUGERAH', 0, 1, 'C')
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, 'SLIP GAJI', 0, 1, 'C')
+        pdf.ln(5)
+
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(40, 5, 'Nama Karyawan:', 0)
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, row['nama_karyawan'], 0, 1)
+
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(40, 5, 'Bagian:', 0)
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, row['bagian'], 0, 1)
+
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(40, 5, 'Gaji Bulan:', 0)
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, row['gaji_bulan'], 0, 1)
+
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, 'Pendapatan', 0, 1)
+        pdf.set_font("Arial", '', 10)
+
+        pdf.cell(60, 5, 'Gaji Pokok', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['gaji_pokok']:,.2f}", 0, 1, 'R')
+        
+        pdf.cell(60, 5, 'Lembur', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['lembur']:,.2f}", 0, 1, 'R')
+        
+        pdf.cell(60, 5, 'Lembur Minggu', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['lembur_minggu']:,.2f}", 0, 1, 'R')
+        
+        pdf.cell(60, 5, 'Uang Makan', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['uang_makan']:,.2f}", 0, 1, 'R')
+
+        total1 = row['gaji_pokok'] + row['lembur'] + row['lembur_minggu'] + row['uang_makan']
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(60, 5, 'Total Pendapatan (1)', 'T', 0)
+        pdf.cell(5, 5, ':', 'T', 0)
+        pdf.cell(0, 5, f"Rp {total1:,.2f}", 'T', 1, 'R')
+
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, 'Potongan', 0, 1)
+        pdf.set_font("Arial", '', 10)
+        
+        pdf.cell(60, 5, 'Absen Finger', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['pot_absen_finger']:,.2f}", 0, 1, 'R')
+
+        pdf.cell(60, 5, 'Izin HR', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['ijin_hr']:,.2f}", 0, 1, 'R')
+
+        total2 = total1 - row['pot_absen_finger'] - row['ijin_hr']
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(60, 5, 'Total Pendapatan Setelah Potongan Absen (2)', 'T', 0)
+        pdf.cell(5, 5, ':', 'T', 0)
+        pdf.cell(0, 5, f"Rp {total2:,.2f}", 'T', 1, 'R')
+
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, 'Potongan Lain-lain', 0, 1)
+        pdf.set_font("Arial", '', 10)
+
+        pdf.cell(60, 5, 'Simpanan Wajib', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['simpanan_wajib']:,.2f}", 0, 1, 'R')
+
+        pdf.cell(60, 5, 'Potongan Koperasi', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['potongan_koperasi']:,.2f}", 0, 1, 'R')
+
+        pdf.cell(60, 5, 'Kasbon', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['kasbon']:,.2f}", 0, 1, 'R')
+        
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(60, 5, 'TOTAL GAJI AKHIR', 'T', 0)
+        pdf.cell(5, 5, ':', 'T', 0)
+        pdf.cell(0, 5, f"Rp {row['gaji_akhir']:,.2f}", 'T', 1, 'R')
+
+        pdf.ln(10)
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, f"Keterangan: {row['keterangan']}", 0, 1)
+        pdf.ln(15)
+        pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
+
+    return pdf.output(dest='S').encode('latin1')
 
 def show_dashboard():
+    # This function is mostly the same, just a change in data fetching
     st.title("Dashboard Bisnis 📈")
     st.markdown("---")
 
@@ -443,7 +554,6 @@ def show_dashboard():
     col_total_value, col_total_items = st.columns(2)
     if not master_df.empty:
         master_df['Stok Saat Ini'] = master_df.apply(lambda row: get_stock_balance(row['kode_bahan'], row['warna']), axis=1)
-        master_df['harga'] = pd.to_numeric(master_df['harga'], errors='coerce').fillna(0)
         total_value = (master_df['Stok Saat Ini'] * master_df['harga']).sum()
         total_items = master_df['Stok Saat Ini'].sum()
 
@@ -457,6 +567,7 @@ def show_dashboard():
     st.markdown("---")
     st.header("Stok 10 Item Terendah")
     if not master_df.empty:
+        master_df['Stok Saat Ini'] = master_df.apply(lambda row: get_stock_balance(row['kode_bahan'], row['warna']), axis=1)
         low_stock_df = master_df.sort_values(by='Stok Saat Ini', ascending=True).head(10)
         low_stock_df['label'] = low_stock_df['nama_bahan'] + ' (' + low_stock_df['warna'] + ')'
         
@@ -520,15 +631,12 @@ def show_master_barang():
             
             st.markdown("---")
             with st.expander("Kelola Data Master"):
-                # Buat dictionary untuk memetakan nama tampilan ke data asli
                 item_options_map = {f"{row['kode_bahan']} ({row['warna']})": (row['kode_bahan'], row['warna']) for _, row in df.iterrows()}
                 item_to_edit_str = st.selectbox("Pilih Kode Bahan (Warna)", list(item_options_map.keys()), key="select_edit_master")
                 
                 if item_to_edit_str:
-                    # Ambil kode_bahan dan warna yang benar dari dictionary
                     selected_kode, selected_warna = item_options_map[item_to_edit_str]
                     
-                    # Gunakan kode dan warna yang sudah dijamin benar untuk memfilter DataFrame
                     filtered_df = df[(df['kode_bahan'] == selected_kode) & (df['warna'] == selected_warna)]
 
                     if not filtered_df.empty:
@@ -610,6 +718,7 @@ def show_input_masuk():
                 'yard': 'Yard',
                 'keterangan': 'Keterangan'
             }, inplace=True)
+            df['id'] = range(1, len(df) + 1)
             st.dataframe(df.drop('id', axis=1), use_container_width=True, hide_index=True)
 
             st.markdown("---")
@@ -643,6 +752,15 @@ def show_input_masuk():
         else:
             st.info("Belum ada data barang masuk.")
 
+def get_unique_yards_for_item(kode_bahan, warna):
+    masuk_df = get_barang_masuk()
+    keluar_df = get_barang_keluar()
+    
+    yards_in = masuk_df[(masuk_df['kode_bahan'] == kode_bahan) & (masuk_df['warna'] == warna)]['yard'].tolist()
+    yards_out = keluar_df[(keluar_df['kode_bahan'] == kode_bahan) & (keluar_df['warna'] == warna)]['yard'].tolist()
+    
+    unique_yards = sorted(list(set(yards_in + yards_out)))
+    return unique_yards
 
 def show_transaksi_keluar_invoice_page():
     st.title("Transaksi Keluar (Penjualan) & Invoice 🧾")
@@ -661,17 +779,15 @@ def show_transaksi_keluar_invoice_page():
     if 'cart_items' not in st.session_state:
         st.session_state['cart_items'] = []
     
-    # Check for delete button clicks before rendering the form
     for i in range(len(st.session_state['cart_items'])):
         if st.session_state.get(f"delete_btn_{i}"):
             st.session_state['cart_items'].pop(i)
-            st.session_state.pop(f"delete_btn_{i}") # Clean up session state
+            st.session_state.pop(f"delete_btn_{i}")
             st.rerun()
 
     with tab_new_invoice:
         st.subheader("Formulir Transaksi Penjualan")
         
-        # Form untuk menambah item baru ke keranjang - di luar st.form utama
         with st.container(border=True):
             col_item_select, col_add_btn = st.columns([0.8, 0.2])
             with col_item_select:
@@ -692,7 +808,6 @@ def show_transaksi_keluar_invoice_page():
                     st.session_state['cart_items'].append(new_item)
                     st.rerun()
 
-        # Start the single main form for transaction submission
         with st.form("new_transaction_form"):
             customer_name = st.text_input("Nama Pelanggan", help="Wajib diisi", key="customer_name")
             
@@ -706,8 +821,6 @@ def show_transaksi_keluar_invoice_page():
                     
                     with col_item_display:
                         st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
-                    # Move the st.button call outside of the form
-                    # The previous check `st.session_state.get(f"delete_btn_{i}")` is now done before the form is rendered.
                     
                     stok_saat_ini = get_stock_balance(item['kode_bahan'], item['warna'])
                     
@@ -784,9 +897,7 @@ def show_transaksi_keluar_invoice_page():
             if st.button("Tampilkan & Unduh Invoice"):
                 invoice_data = invoices_df[invoices_df['No Invoice'] == selected_invoice].iloc[0]
                 invoice_items_df = get_invoice_items(selected_invoice)
-                invoice_items_df['harga'] = pd.to_numeric(invoice_items_df['harga'], errors='coerce')
-                invoice_items_df['total'] = pd.to_numeric(invoice_items_df['total'], errors='coerce')
-                
+
                 st.subheader(f"Detail Invoice: {selected_invoice}")
                 st.write(f"**Nama Pelanggan:** {invoice_data['Nama Pelanggan']}")
                 st.write(f"**Tanggal:** {invoice_data['Tanggal & Waktu']}")
@@ -836,13 +947,13 @@ def show_monitoring_stok():
         end_date = st.date_input("Tanggal Selesai", value=datetime.now().date())
         
     if st.button("Tampilkan Rekam Jejak"):
-        records_df = get_in_out_records(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+        records_df = get_in_out_records(start_date, end_date)
         if not records_df.empty:
             records_df.rename(columns={
                 'tanggal_waktu': 'Tanggal & Waktu',
                 'kode_bahan': 'Kode Bahan',
                 'warna': 'Warna',
-                'qty': 'Jumlah',
+                'stok': 'Jumlah',
                 'type': 'Tipe',
                 'keterangan': 'Keterangan'
             }, inplace=True)
@@ -859,7 +970,6 @@ def show_payroll_page():
     with tab_master:
         st.subheader("Data Master Karyawan")
         
-        # Form to add new employee
         with st.expander("➕ Tambah Karyawan Baru", expanded=False):
             with st.form("add_employee_form"):
                 col1, col2 = st.columns(2)
@@ -885,7 +995,6 @@ def show_payroll_page():
             employees_df_master.rename(columns={'id':'ID', 'nama_karyawan':'Nama', 'bagian':'Bagian', 'gaji_pokok':'Gaji Pokok'}, inplace=True)
             st.dataframe(employees_df_master, use_container_width=True, hide_index=True)
 
-            # Form to edit/delete employee
             st.markdown("---")
             with st.expander("Kelola Data Karyawan"):
                 selected_employee_id = st.selectbox("Pilih ID Karyawan", employees_df_master['ID'].tolist(), key='master_edit_select')
@@ -933,7 +1042,6 @@ def show_payroll_page():
                     st.write(f"**Bagian:** {selected_employee_data['bagian']}")
 
                     selected_date = st.date_input("Pilih Tanggal Gaji", value=datetime.now().date())
-                    # Format the date to "Month Year" string for database storage
                     gaji_bulan = selected_date.strftime('%B %Y')
                     
                     st.markdown("### Pendapatan")
@@ -972,11 +1080,10 @@ def show_payroll_page():
     with tab_history:
         st.subheader("Riwayat Penggajian")
         
-        # Filter for PDF download
         st.markdown("### Unduh Semua Slip Gaji (PDF)")
-        payroll_months_df = get_data_from_sheet('payroll')
-        if not payroll_months_df.empty:
-            payroll_months = payroll_months_df['gaji_bulan'].unique().tolist()
+        payroll_df = get_payroll_records()
+        if not payroll_df.empty:
+            payroll_months = payroll_df['gaji_bulan'].unique().tolist()
             selected_month = st.selectbox("Pilih Bulan Gaji", payroll_months)
             
             if st.button(f"Unduh Slip Gaji {selected_month}"):
@@ -996,9 +1103,7 @@ def show_payroll_page():
 
         st.markdown("---")
         st.subheader("Tabel Riwayat Penggajian")
-        payroll_df = get_payroll_records()
         if not payroll_df.empty:
-            # Mapping bulan dari Inggris ke Indonesia
             month_mapping = {
                 'January': 'Januari', 'February': 'Februari', 'March': 'Maret',
                 'April': 'April', 'May': 'Mei', 'June': 'Juni',
@@ -1006,11 +1111,9 @@ def show_payroll_page():
                 'October': 'Oktober', 'November': 'November', 'December': 'Desember'
             }
             
-            # Mengubah format tanggal_waktu
             payroll_df['tanggal_waktu'] = pd.to_datetime(payroll_df['tanggal_waktu'])
             payroll_df['tanggal_waktu'] = payroll_df['tanggal_waktu'].dt.strftime('%d %B %Y')
             
-            # Mengganti nama bulan dari bahasa Inggris ke Indonesia
             for en, idn in month_mapping.items():
                 payroll_df['tanggal_waktu'] = payroll_df['tanggal_waktu'].str.replace(en, idn)
             
@@ -1092,5 +1195,5 @@ def main():
         login_page()
 
 if __name__ == "__main__":
-    init_app_state()
+    init_db()
     main()

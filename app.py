@@ -1,57 +1,81 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
 import gspread
+import pandas as pd
 from google.oauth2.service_account import Credentials
-import bcrypt
-import streamlit.components.v1 as components # Import for custom HTML/JS
 
-# --- Page Configuration ---
-st.set_page_config(
-    page_title="Timesheet METSO",
-    page_icon="📝",
-    layout="wide"
-)
+# --- Konfigurasi Google Sheets ---
+# Sesuaikan SHEET_ID dengan ID Google Sheet Anda
+SHEET_ID = "PT. BERKAT KARYA ANUGERAH"
 
-# --- Google Sheet Configuration ---
-scope = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+# Otorisasi kredensial dari secrets
+try:
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SHEET_ID)
+except KeyError:
+    st.error("Pastikan file secrets.toml sudah terkonfigurasi dengan benar.")
+    st.stop()
+except Exception as e:
+    st.error(f"Terjadi kesalahan saat otorisasi Google Sheets: {e}")
+    st.stop()
 
-key_dict = st.secrets["gcp_service_account"]
-creds = Credentials.from_service_account_info(key_dict, scopes=scope)
-SHEET_ID = "1BwwoNx3t3MBrsOB3H9BSxnWbYCwChwgl4t1HrpFYWpA"
-
-@st.cache_resource(ttl=3600) # Cache connection for 1 hour (3600 seconds)
-def get_google_sheet_client(sheet_id):
+# --- Fungsi Login ---
+def authenticate(username, password):
     try:
-        client = gspread.authorize(creds)
-        sheet_user_obj = client.open_by_key(sheet_id).worksheet("user")
-        sheet_presensi_obj = client.open_by_key(sheet_id).worksheet("presensi")
-        sheet_audit_log_obj = client.open_by_key(sheet_id).worksheet("audit_log")
-        # NEW: Areas sheet
-        sheet_areas_obj = client.open_by_key(sheet_id).worksheet("areas")
-
-        return client, sheet_user_obj.title, sheet_presensi_obj.title, sheet_audit_log_obj.title, sheet_areas_obj.title
-    except gspread.exceptions.SpreadsheetNotFound:
-        st.error(
-            "**Error:** Spreadsheet not found. "
-            "Please double-check the `SHEET_ID` in your code. "
-            "Also, ensure your service account (email in credential) has Editor access to this Google Sheet."
-        )
-        st.stop()
-    except gspread.exceptions.WorksheetNotFound as e:
-        # Simplified error message to prevent IndexError
-        st.error(
-            f"**Error:** Worksheet not found: {e.args[0]}. "
-            "Please ensure all required worksheets (user, presensi, audit_log, areas) exist in your Google Sheet."
-        )
-        st.stop()
+        # Buka worksheet 'users'
+        users_worksheet = sheet.worksheet("users")
+        # Ambil semua data dari worksheet
+        records = users_worksheet.get_all_records()
+        df = pd.DataFrame(records)
+        
+        # Cari pengguna berdasarkan username dan password
+        user = df[(df['username'] == username) & (df['password'] == password)]
+        
+        if not user.empty:
+            return True
+        else:
+            return False
+    except gspread.exceptions.WorksheetNotFound:
+        st.error("Worksheet 'users' tidak ditemukan. Pastikan nama sheet sudah benar.")
+        return False
     except Exception as e:
-        st.error(f"**Google Sheets connection error:** {e}. "
-                 "Please check your internet connection or Google API status."
-                 "If it's a 503 error, try refreshing the app in a few moments.")
-        st.stop()
+        st.error(f"Terjadi kesalahan saat membaca data pengguna: {e}")
+        return False
 
-client, sheet_user_title, sheet_presensi_title, sheet_audit_log_title, sheet_areas_title = get_google_sheet_client(SHEET_ID)
+# --- Tampilan Halaman ---
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
+if st.session_state['logged_in']:
+    st.header("Selamat datang di Timesheet METSO!")
+    st.success("Anda berhasil login.")
+    st.write("Ini adalah aplikasi sederhana untuk menampilkan data dari Google Sheets.")
+    st.write("---")
+    
+    st.subheader("Data Pengguna dari Google Sheets")
+    try:
+        users_worksheet = sheet.worksheet("users")
+        df_users = pd.DataFrame(users_worksheet.get_all_records())
+        st.dataframe(df_users)
+    except Exception as e:
+        st.error(f"Gagal menampilkan data: {e}")
+        
+    if st.button("Logout"):
+        st.session_state['logged_in'] = False
+        st.experimental_rerun()
+else:
+    st.title("Halaman Login")
+    
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        login_button = st.form_submit_button("Login")
+
+        if login_button:
+            if authenticate(username, password):
+                st.session_state['logged_in'] = True
+                st.success(f"Berhasil login sebagai {username}!")
+                st.experimental_rerun()
+            else:
+                st.error("Username atau password salah.")

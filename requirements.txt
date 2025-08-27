@@ -5,3 +5,5 @@ google-auth
 bcrypt
 fpdf
 plotly
+
+oauth2client

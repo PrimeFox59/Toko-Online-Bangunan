@@ -50,17 +50,25 @@ st.markdown("""
     .st-emotion-cache-1av5400 .st-cc {
         color: #172B4D;
     }
+    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+        font-size: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # --- GOOGLE SHEETS CONNECTION & SETUP ---
-try:
-    creds = st.secrets["connections"]["gsheets"]
-    gc = gspread.service_account_from_dict(creds)
-    sh = gc.open_by_key(st.secrets["connections"]["gsheets"]["spreadsheet"].split('/')[-2])
-except Exception as e:
-    st.error(f"Gagal terhubung ke Google Sheets. Pastikan file secrets.toml sudah benar dan API Google Sheets/Drive telah diaktifkan: {e}")
-    st.stop()
+def get_gsheet_connection():
+    try:
+        creds = st.secrets["connections"]["gsheets"]
+        gc = gspread.service_account_from_dict(creds)
+        sh = gc.open_by_key(st.secrets["connections"]["gsheets"]["spreadsheet"].split('/')[-2])
+        return sh
+    except Exception as e:
+        st.error(f"Gagal terhubung ke Google Sheets. Pastikan file secrets.toml sudah benar dan API Google Sheets/Drive telah diaktifkan: {e}")
+        st.stop()
+    return None
+
+sh = get_gsheet_connection()
 
 # --- UTILITY FUNCTIONS ---
 def get_worksheet(sheet_name):
@@ -72,13 +80,14 @@ def get_worksheet(sheet_name):
 def check_and_create_worksheets():
     """Checks for required worksheets and creates them with headers if they don't exist."""
     required_worksheets = {
+        "users": ['username', 'password_hash', 'role'],
         "master_barang": ['kode_bahan', 'nama_supplier', 'nama_bahan', 'warna', 'rak', 'harga'],
-        "barang_masuk": ['tanggal_masuk', 'kode_bahan', 'jumlah_masuk', 'invoice_supplier'],
-        "barang_keluar": ['tanggal_keluar', 'kode_bahan', 'jumlah_keluar', 'invoice_konsumen'],
-        "invoices": ['invoice_number', 'customer_name', 'invoice_date', 'total_amount'],
-        "invoice_items": ['invoice_number', 'kode_bahan', 'quantity', 'price_per_item', 'total_price'],
-        "employees": ['username', 'password', 'role'],
-        "payroll": ['employee_id', 'pay_date', 'amount']
+        "barang_masuk": ['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'],
+        "barang_keluar": ['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'],
+        "invoices": ['invoice_number', 'tanggal_waktu', 'customer_name'],
+        "invoice_items": ['invoice_number', 'kode_bahan', 'nama_bahan', 'qty', 'harga', 'total'],
+        "employees": ['nama_karyawan', 'bagian', 'gaji_pokok'],
+        "payroll": ['tanggal_waktu', 'gaji_bulan', 'employee_id', 'gaji_pokok', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir', 'keterangan']
     }
 
     existing_worksheets = [ws.title for ws in sh.worksheets()]
@@ -122,415 +131,989 @@ def delete_row_from_gsheet(sheet_name, row_index):
 
 # --- AUTHENTICATION FUNCTIONS ---
 def get_user_data():
-    return get_data_from_gsheets('employees')
+    return get_data_from_gsheets('users')
 
-def authenticate(username, password):
+def check_login(username, password):
     users_df = get_user_data()
     user = users_df[users_df['username'] == username]
     if not user.empty:
-        stored_password_hash = user.iloc[0]['password']
+        stored_password_hash = user.iloc[0]['password_hash']
+        # This part is a bit tricky with gsheets.
+        # bcrypt hash is a binary object. gsheets stores it as a string.
+        # We'll just do a simple password check for simplicity.
+        # For production, a more robust solution would be needed.
         return password == stored_password_hash
     return False
 
-# --- PAGES ---
-def show_login_page():
-    st.title("Login Sistem Kontrol Stok")
-    with st.form("Login Form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.form_submit_button("Login"):
-            if authenticate(username, password):
-                st.session_state['logged_in'] = True
-                st.session_state['username'] = username
-                st.session_state['page'] = 'Dashboard'
-                st.success("Login berhasil!")
-                st.rerun()
-            else:
-                st.error("Username atau password salah.")
+def check_and_create_owner():
+    users_df = get_data_from_gsheets('users')
+    if users_df.empty or 'owner' not in users_df['username'].tolist():
+        st.warning("Pengguna 'owner' tidak ditemukan. Membuat sekarang...")
+        # Note: In a real-world app, you'd want to hash this password.
+        # But to simplify for gsheets, we'll store it as plain text.
+        # For a robust solution, you would need to hash the password before storing it.
+        if append_row_to_gsheet('users', ['owner', 'owner123', 'admin']):
+            st.success("Pengguna 'owner' berhasil dibuat.")
 
-def show_dashboard():
-    st.title(f"Selamat Datang, {st.session_state['username']}! 👋")
-    st.markdown("### Dashboard Ringkasan Stok")
-    
+# --- CRUD Functions - Inventory ---
+def add_master_item(kode, supplier, nama, warna, rak, harga):
     df_master = get_data_from_gsheets('master_barang')
-    df_masuk = get_data_from_gsheets('barang_masuk')
-    df_keluar = get_data_from_gsheets('barang_keluar')
+    if not df_master.empty and ((df_master['kode_bahan'] == kode) & (df_master['warna'] == warna)).any():
+        return False
+    return append_row_to_gsheet('master_barang', [kode, supplier, nama, warna, rak, harga])
 
-    st.subheader("Ringkasan Stok")
-    if not df_master.empty:
-        stok_masuk = df_masuk.groupby('kode_bahan')['jumlah_masuk'].sum().reset_index()
-        stok_keluar = df_keluar.groupby('kode_bahan')['jumlah_keluar'].sum().reset_index()
-        
-        stok_df = df_master[['kode_bahan', 'nama_bahan']].copy()
-        stok_df['stok_saat_ini'] = 0
+def get_master_barang():
+    return get_data_from_gsheets('master_barang')
 
-        for index, row in stok_df.iterrows():
-            kode = row['kode_bahan']
-            masuk = stok_masuk[stok_masuk['kode_bahan'] == kode]['jumlah_masuk'].sum()
-            keluar = stok_keluar[stok_keluar['kode_bahan'] == kode]['jumlah_keluar'].sum()
-            stok_df.loc[index, 'stok_saat_ini'] = masuk - keluar
-
-        st.dataframe(stok_df, use_container_width=True)
-    else:
-        st.info("Tidak ada data master barang.")
-
-    st.subheader("Tren Barang Masuk & Keluar (Bulan)")
-    if not df_masuk.empty and not df_keluar.empty:
-        df_masuk['tanggal_masuk'] = pd.to_datetime(df_masuk['tanggal_masuk'])
-        df_keluar['tanggal_keluar'] = pd.to_datetime(df_keluar['tanggal_keluar'])
-
-        df_masuk['bulan'] = df_masuk['tanggal_masuk'].dt.to_period('M')
-        df_keluar['bulan'] = df_keluar['tanggal_keluar'].dt.to_period('M')
-        
-        trend_masuk = df_masuk.groupby('bulan')['jumlah_masuk'].sum().reset_index()
-        trend_keluar = df_keluar.groupby('bulan')['jumlah_keluar'].sum().reset_index()
-        
-        trend_df = pd.merge(trend_masuk, trend_keluar, on='bulan', how='outer').fillna(0)
-        trend_df['bulan'] = trend_df['bulan'].astype(str)
-        
-        fig = px.bar(trend_df, x='bulan', y=['jumlah_masuk', 'jumlah_keluar'],
-                     barmode='group', title="Tren Barang Masuk & Keluar")
-        st.plotly_chart(fig, use_container_width=True)
-
-def show_master_barang():
-    st.title("Manajemen Master Barang")
-    st.subheader("Tambah Barang Baru")
-    with st.expander("Form Tambah Barang", expanded=False):
-        with st.form("add_item_form", clear_on_submit=True):
-            kode = st.text_input("Kode Bahan").upper()
-            supplier = st.text_input("Nama Supplier")
-            nama = st.text_input("Nama Bahan")
-            warna = st.text_input("Warna")
-            rak = st.text_input("Lokasi Rak")
-            harga = st.number_input("Harga", min_value=0, format="%d")
-            submit_button = st.form_submit_button("Tambah Barang")
-
-            if submit_button:
-                if kode and nama:
-                    if append_row_to_gsheet('master_barang', [kode, supplier, nama, warna, rak, harga]):
-                        st.success("Barang berhasil ditambahkan!")
-                    else:
-                        st.error("Gagal menambahkan barang. Silakan coba lagi.")
-                else:
-                    st.error("Kode Bahan dan Nama Bahan tidak boleh kosong.")
-    
-    st.subheader("Daftar Barang")
-    df = get_data_from_gsheets('master_barang')
-    if not df.empty:
-        st.dataframe(df, use_container_width=True)
-        
-        # Edit and Delete functionality
-        st.subheader("Edit/Hapus Barang")
-        with st.expander("Form Edit/Hapus", expanded=False):
-            kode_list = df['kode_bahan'].tolist()
-            selected_kode = st.selectbox("Pilih Kode Bahan untuk Edit/Hapus", kode_list)
-            selected_row = df[df['kode_bahan'] == selected_kode].iloc[0]
-            row_index = df.index[df['kode_bahan'] == selected_kode].tolist()[0]
-            
-            with st.form("edit_item_form"):
-                new_supplier = st.text_input("Nama Supplier", value=selected_row['nama_supplier'])
-                new_nama = st.text_input("Nama Bahan", value=selected_row['nama_bahan'])
-                new_warna = st.text_input("Warna", value=selected_row['warna'])
-                new_rak = st.text_input("Lokasi Rak", value=selected_row['rak'])
-                new_harga = st.number_input("Harga", min_value=0, format="%d", value=int(selected_row['harga']))
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    update_button = st.form_submit_button("Update Barang")
-                with col2:
-                    delete_button = st.form_submit_button("Hapus Barang")
-            
-            if update_button:
-                if update_row_in_gsheet('master_barang', row_index, [selected_kode, new_supplier, new_nama, new_warna, new_rak, new_harga]):
-                    st.success("Barang berhasil diupdate!")
-                else:
-                    st.error("Gagal mengupdate barang. Silakan coba lagi.")
-                st.rerun()
-
-            if delete_button:
-                if delete_row_from_gsheet('master_barang', row_index):
-                    st.success("Barang berhasil dihapus!")
-                else:
-                    st.error("Gagal menghapus barang. Silakan coba lagi.")
-                st.rerun()
-    else:
-        st.info("Belum ada data di Master Barang. Silakan tambahkan barang terlebih dahulu.")
-
-def show_input_masuk():
-    st.title("Input Barang Masuk")
-    st.subheader("Form Input Barang Masuk")
+def update_master_item(old_kode, old_warna, new_kode, new_warna, supplier, nama, rak, harga):
     df_master = get_data_from_gsheets('master_barang')
-    if df_master.empty:
-        st.warning("Data master barang kosong. Tambahkan barang terlebih dahulu di halaman 'Master Barang'.")
-        return
+    row_index = df_master.index[(df_master['kode_bahan'] == old_kode) & (df_master['warna'] == old_warna)].tolist()
+    if not row_index:
+        return False
+    
+    row_index = row_index[0]
+    
+    # Check for duplicate key combination
+    if (new_kode != old_kode or new_warna != old_warna):
+        if ((df_master['kode_bahan'] == new_kode) & (df_master['warna'] == new_warna)).any():
+            return False
 
-    item_options = df_master['kode_bahan'].tolist()
-    
-    with st.form("form_barang_masuk", clear_on_submit=True):
-        tanggal = st.date_input("Tanggal Masuk", datetime.now())
-        kode = st.selectbox("Pilih Kode Bahan", item_options)
-        jumlah = st.number_input("Jumlah Masuk", min_value=1, format="%d")
-        invoice_supplier = st.text_input("Nomor Invoice Supplier")
-        
-        submit_button = st.form_submit_button("Simpan Barang Masuk")
-        
-        if submit_button:
-            if append_row_to_gsheet('barang_masuk', [tanggal.strftime("%Y-%m-%d"), kode, jumlah, invoice_supplier]):
-                st.success(f"Barang Masuk untuk {kode} sebanyak {jumlah} berhasil disimpan.")
-            else:
-                st.error("Gagal menyimpan data. Silakan coba lagi.")
+    return update_row_in_gsheet('master_barang', row_index, [new_kode, supplier, nama, new_warna, rak, harga])
 
-    st.subheader("Riwayat Barang Masuk")
-    df = get_data_from_gsheets('barang_masuk')
-    if not df.empty:
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.info("Tidak ada riwayat barang masuk.")
-
-def show_transaksi_keluar_invoice_page():
-    st.title("Manajemen Transaksi Keluar (Invoice)")
-    
-    st.subheader("Daftar Invoice")
-    df_invoices = get_data_from_gsheets('invoices')
-    if not df_invoices.empty:
-        st.dataframe(df_invoices, use_container_width=True)
-    else:
-        st.info("Tidak ada data invoice.")
-    
-    st.subheader("Buat Invoice Baru")
-    with st.expander("Form Buat Invoice", expanded=False):
-        with st.form("form_invoice_baru", clear_on_submit=True):
-            invoice_number = st.text_input("Nomor Invoice").upper()
-            customer_name = st.text_input("Nama Konsumen")
-            invoice_date = st.date_input("Tanggal Invoice", datetime.now())
-            
-            submit_button = st.form_submit_button("Buat Invoice")
-            
-            if submit_button:
-                if invoice_number and customer_name:
-                    if append_row_to_gsheet('invoices', [invoice_number, customer_name, invoice_date.strftime("%Y-%m-%d"), 0]):
-                        st.success(f"Invoice {invoice_number} untuk {customer_name} berhasil dibuat.")
-                    else:
-                        st.error("Gagal membuat invoice.")
-                else:
-                    st.error("Nomor Invoice dan Nama Konsumen tidak boleh kosong.")
-    
-    st.subheader("Tambah Item ke Invoice")
-    df_invoices = get_data_from_gsheets('invoices')
+def delete_master_item(kode, warna):
     df_master = get_data_from_gsheets('master_barang')
+    row_index = df_master.index[(df_master['kode_bahan'] == kode) & (df_master['warna'] == warna)].tolist()
+    if not row_index:
+        return False
+    return delete_row_from_gsheet('master_barang', row_index[0])
+
+def add_barang_masuk(tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
+    return append_row_to_gsheet('barang_masuk', [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
+
+def get_barang_masuk():
+    return get_data_from_gsheets('barang_masuk')
+
+def update_barang_masuk(id, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
+    df_in = get_data_from_gsheets('barang_masuk')
+    row_index = df_in.index[df_in['id'] == id].tolist()
+    if not row_index:
+        return False
+    return update_row_in_gsheet('barang_masuk', row_index[0], [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
+
+def delete_barang_masuk(id):
+    df_in = get_data_from_gsheets('barang_masuk')
+    row_index = df_in.index[df_in['id'] == id].tolist()
+    if not row_index:
+        return False
+    return delete_row_from_gsheet('barang_masuk', row_index[0])
+
+def get_stock_balance(kode_bahan, warna):
+    df_in = get_data_from_gsheets('barang_masuk')
+    df_out = get_data_from_gsheets('barang_keluar')
     
-    if not df_invoices.empty and not df_master.empty:
-        invoice_options = df_invoices['invoice_number'].tolist()
-        item_options = df_master['kode_bahan'].tolist()
-        
-        with st.form("form_tambah_item_invoice", clear_on_submit=True):
-            selected_invoice = st.selectbox("Pilih Invoice", invoice_options)
-            selected_item = st.selectbox("Pilih Kode Bahan", item_options)
-            quantity = st.number_input("Jumlah", min_value=1, format="%d")
-            
-            add_item_button = st.form_submit_button("Tambah Item")
-            
-            if add_item_button:
-                item_details = df_master[df_master['kode_bahan'] == selected_item].iloc[0]
-                price_per_item = int(item_details['harga'])
-                total_price = quantity * price_per_item
-                
-                if append_row_to_gsheet('barang_keluar', [datetime.now().strftime("%Y-%m-%d"), selected_item, quantity, selected_invoice]):
-                    if append_row_to_gsheet('invoice_items', [selected_invoice, selected_item, quantity, price_per_item, total_price]):
-                        st.success(f"Item {selected_item} berhasil ditambahkan ke Invoice {selected_invoice}.")
-                        
-                        df_invoice_items = get_data_from_gsheets('invoice_items')
-                        invoice_total = df_invoice_items[df_invoice_items['invoice_number'] == selected_invoice]['total_price'].sum()
-                        
-                        invoice_row_index = df_invoices[df_invoices['invoice_number'] == selected_invoice].index.tolist()[0]
-                        df_invoices.loc[invoice_row_index, 'total_amount'] = invoice_total
-                        update_row_in_gsheet('invoices', invoice_row_index, df_invoices.loc[invoice_row_index].tolist())
-                        
-                    else:
-                        st.error("Gagal menambahkan item ke invoice.")
-                else:
-                    st.error("Gagal menyimpan data barang keluar.")
+    in_stock = df_in[(df_in['kode_bahan'] == kode_bahan) & (df_in['warna'] == warna)]['stok'].sum()
+    out_stock = df_out[(df_out['kode_bahan'] == kode_bahan) & (df_out['warna'] == warna)]['stok'].sum()
+
+    return in_stock - out_stock
+
+def get_in_out_records(start_date, end_date):
+    df_in = get_data_from_gsheets('barang_masuk')
+    df_out = get_data_from_gsheets('barang_keluar')
     
-    st.subheader("Cetak Invoice")
-    if not df_invoices.empty:
-        invoice_to_print = st.selectbox("Pilih Invoice untuk Dicetak", df_invoices['invoice_number'].tolist())
-        if st.button("Cetak PDF"):
-            generate_pdf(invoice_to_print)
+    if df_in.empty and df_out.empty:
+        return pd.DataFrame()
 
-def generate_pdf(invoice_number):
-    df_invoices = get_data_from_gsheets('invoices')
-    df_invoice_items = get_data_from_gsheets('invoice_items')
-    df_master = get_data_from_gsheets('master_barang')
-
-    invoice_details = df_invoices[df_invoices['invoice_number'] == invoice_number].iloc[0]
-    invoice_items = df_invoice_items[df_invoice_items['invoice_number'] == invoice_number]
+    df_in['tanggal_waktu'] = pd.to_datetime(df_in['tanggal_waktu'])
+    df_in = df_in[(df_in['tanggal_waktu'].dt.date >= start_date) & (df_in['tanggal_waktu'].dt.date <= end_date)]
+    df_in = df_in.assign(qty=df_in['stok'], type='Masuk', keterangan=df_in['keterangan'])
     
-    if invoice_items.empty:
-        st.warning("Invoice ini tidak memiliki item.")
-        return
+    df_out['tanggal_waktu'] = pd.to_datetime(df_out['tanggal_waktu'])
+    df_out = df_out[(df_out['tanggal_waktu'].dt.date >= start_date) & (df_out['tanggal_waktu'].dt.date <= end_date)]
+    df_out = df_out.assign(qty=df_out['stok'], type='Keluar', keterangan=df_out['keterangan'])
+    
+    df = pd.concat([df_in[['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan']], 
+                    df_out[['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan']]], ignore_index=True)
+    
+    df = df.sort_values(by='tanggal_waktu')
+    return df
 
-    class PDF(FPDF):
-        def header(self):
-            self.set_font('Arial', 'B', 15)
-            self.cell(0, 10, 'INVOICE', 0, 1, 'C')
-            self.ln(10)
+# --- Invoice Functions ---
+def get_invoices():
+    return get_data_from_gsheets('invoices')
 
-        def footer(self):
-            self.set_y(-15)
-            self.set_font('Arial', 'I', 8)
-            self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+def get_invoice_items(invoice_number):
+    df_items = get_data_from_gsheets('invoice_items')
+    return df_items[df_items['invoice_number'] == invoice_number]
 
-        def chapter_title(self, title):
-            self.set_font('Arial', 'B', 12)
-            self.cell(0, 10, title, 0, 1, 'L')
-            self.ln(5)
-
-        def chapter_body(self, data, is_table=False):
-            self.set_font('Arial', '', 10)
-            if is_table:
-                self.set_fill_color(200, 220, 255)
-                self.cell(30, 7, 'Kode Bahan', 1, 0, 'C', 1)
-                self.cell(60, 7, 'Nama Bahan', 1, 0, 'C', 1)
-                self.cell(20, 7, 'Qty', 1, 0, 'C', 1)
-                self.cell(40, 7, 'Harga Satuan', 1, 0, 'C', 1)
-                self.cell(40, 7, 'Total', 1, 1, 'C', 1)
-
-                for index, row in data.iterrows():
-                    nama_bahan = df_master[df_master['kode_bahan'] == row['kode_bahan']]['nama_bahan'].iloc[0]
-                    self.cell(30, 7, str(row['kode_bahan']), 1, 0)
-                    self.cell(60, 7, str(nama_bahan), 1, 0)
-                    self.cell(20, 7, str(row['quantity']), 1, 0)
-                    self.cell(40, 7, f"Rp{row['price_per_item']:,}", 1, 0, 'R')
-                    self.cell(40, 7, f"Rp{row['total_price']:,}", 1, 1, 'R')
-            else:
-                self.multi_cell(0, 5, data)
-                self.ln()
-
-    pdf = PDF()
+def get_barang_keluar():
+    return get_data_from_gsheets('barang_keluar')
+    
+def generate_invoice_pdf(invoice_data, invoice_items):
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
-    pdf.set_font('Arial', '', 12)
-
-    pdf.chapter_title(f"Invoice # {invoice_details['invoice_number']}")
-    pdf.chapter_body(f"Customer: {invoice_details['customer_name']}\nDate: {invoice_details['invoice_date']}\n")
-
-    pdf.chapter_title("Items")
-    pdf.chapter_body(invoice_items, is_table=True)
-
+    pdf.set_font("Arial", 'B', 16)
+    
+    pdf.cell(0, 10, 'PT. BERKAT KARYA ANUGERAH', 0, 1, 'C')
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, 'INVOICE', 0, 1, 'C')
+    pdf.set_font("Arial", '', 12)
+    pdf.ln(5)
+    
+    pdf.cell(0, 5, f"No Invoice: {invoice_data['No Invoice']}", 0, 1, 'L')
+    pdf.cell(0, 5, f"Tanggal: {invoice_data['Tanggal & Waktu']}", 0, 1, 'L')
+    pdf.cell(0, 5, f"Nama Pelanggan: {invoice_data['Nama Pelanggan']}", 0, 1, 'L')
+    
     pdf.ln(10)
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, f"Total Amount: Rp{invoice_details['total_amount']:,}", 0, 1, 'R')
 
-    pdf_output = pdf.output(dest='S').encode('latin1')
-    st.download_button(
-        label="Download Invoice PDF",
-        data=pdf_output,
-        file_name=f"invoice_{invoice_number}.pdf",
-        mime="application/pdf"
-    )
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(10, 10, 'No', 1, 0, 'C')
+    pdf.cell(70, 10, 'Item', 1, 0, 'C')
+    pdf.cell(30, 10, 'Qty', 1, 0, 'C')
+    pdf.cell(40, 10, 'Harga', 1, 0, 'C')
+    pdf.cell(40, 10, 'Total Harga', 1, 1, 'C')
 
-def show_monitoring_stok():
-    st.title("Monitoring Stok")
-    st.markdown("### Ringkasan Stok Saat Ini")
+    pdf.set_font("Arial", '', 12)
+    total_invoice_amount = 0
+    for idx, row in invoice_items.iterrows():
+        total_invoice_amount += row['total']
+        pdf.cell(10, 10, str(idx + 1), 1, 0, 'C')
+        pdf.cell(70, 10, row['nama_bahan'], 1)
+        pdf.cell(30, 10, str(row['qty']), 1, 0, 'R')
+        pdf.cell(40, 10, f"Rp {row['harga']:,.2f}", 1, 0, 'R')
+        pdf.cell(40, 10, f"Rp {row['total']:,.2f}", 1, 1, 'R')
 
-    df_master = get_data_from_gsheets('master_barang')
-    df_masuk = get_data_from_gsheets('barang_masuk')
-    df_keluar = get_data_from_gsheets('barang_keluar')
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(150, 10, 'Total', 1, 0, 'R')
+    pdf.cell(40, 10, f"Rp {total_invoice_amount:,.2f}", 1, 1, 'R')
     
-    if not df_master.empty:
-        stok_masuk = df_masuk.groupby('kode_bahan')['jumlah_masuk'].sum().reset_index()
-        stok_keluar = df_keluar.groupby('kode_bahan')['jumlah_keluar'].sum().reset_index()
-
-        stok_df = df_master[['kode_bahan', 'nama_bahan', 'rak']].copy()
-        stok_df['stok_saat_ini'] = 0
-
-        for index, row in stok_df.iterrows():
-            kode = row['kode_bahan']
-            masuk = stok_masuk[stok_masuk['kode_bahan'] == kode]['jumlah_masuk'].sum()
-            keluar = stok_keluar[stok_keluar['kode_bahan'] == kode]['jumlah_keluar'].sum()
-            stok_df.loc[index, 'stok_saat_ini'] = masuk - keluar
-        
-        st.dataframe(stok_df, use_container_width=True)
+    pdf.ln(10)
+    pdf.set_font("Arial", '', 12)
+    pdf.cell(0, 5, "Terimakasih atas pembelian anda", 0, 1, 'C')
+    pdf.ln(10)
+    pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
+    
+    return pdf.output(dest='S').encode('latin1')
+    
+def generate_invoice_number():
+    df_invoices = get_invoices()
+    today_date = datetime.now().strftime('%y%m%d')
+    prefix = f"INV-{today_date}-"
+    
+    if not df_invoices.empty:
+        df_invoices = df_invoices[df_invoices['invoice_number'].str.startswith(prefix)]
+        if not df_invoices.empty:
+            last_invoice = df_invoices['invoice_number'].max()
+            last_seq = int(last_invoice.split('-')[-1])
+            new_seq = last_seq + 1
+        else:
+            new_seq = 1
     else:
-        st.info("Tidak ada data untuk ditampilkan.")
+        new_seq = 1
+        
+    new_invoice_number = f"{prefix}{new_seq:03d}"
+    return new_invoice_number
 
-def show_penggajian():
-    st.title("Sistem Penggajian Sederhana")
-    st.subheader("Data Gaji Karyawan")
-    st.info("Sistem ini belum terintegrasi sepenuhnya. Data diinput secara manual.")
+def add_barang_keluar_and_invoice(invoice_number, customer_name, items):
+    tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Check stock before starting transactions
+    for item in items:
+        current_stock = get_stock_balance(item['kode_bahan'], item['warna'])
+        if item['qty'] > current_stock:
+            return False, f"Stok untuk bahan {item['nama_bahan']} ({item['warna']}) tidak mencukupi. Stok saat ini: {current_stock}"
+
+    # Insert into invoices table
+    if not append_row_to_gsheet('invoices', [invoice_number, tanggal_waktu, customer_name]):
+        return False, "Gagal membuat invoice."
     
+    # Insert items and outgoing goods
+    for item in items:
+        if not append_row_to_gsheet('invoice_items', [invoice_number, item['kode_bahan'], item['nama_bahan'], item['qty'], item['harga'], item['total']]):
+            return False, "Gagal menambahkan item ke invoice."
+        if not append_row_to_gsheet('barang_keluar', [tanggal_waktu, item['kode_bahan'], item['warna'], item['qty'], item['yard'], item['keterangan']]):
+            return False, "Gagal mencatat barang keluar."
+    
+    return True, "Transaksi berhasil dicatat dan invoice dibuat."
+
+# --- Payroll Functions ---
+def add_employee(nama, bagian, gaji):
+    df_employees = get_data_from_gsheets('employees')
+    # Check if employee already exists to avoid duplicates
+    if not df_employees.empty and (df_employees['nama_karyawan'] == nama).any():
+        return False
+    return append_row_to_gsheet('employees', [nama, bagian, gaji])
+
+def get_employees():
+    return get_data_from_gsheets('employees')
+
+def update_employee(old_name, new_nama, new_bagian, new_gaji):
+    df_employees = get_data_from_gsheets('employees')
+    row_index = df_employees.index[df_employees['nama_karyawan'] == old_name].tolist()
+    if not row_index:
+        return False
+    return update_row_in_gsheet('employees', row_index[0], [new_nama, new_bagian, new_gaji])
+
+def delete_employee(nama):
+    df_employees = get_data_from_gsheets('employees')
+    row_index = df_employees.index[df_employees['nama_karyawan'] == nama].tolist()
+    if not row_index:
+        return False
+    return delete_row_from_gsheet('employees', row_index[0])
+
+def add_payroll_record(employee_id, gaji_bulan, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan):
+    tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return append_row_to_gsheet('payroll', [tanggal_waktu, gaji_bulan, employee_id, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan])
+
+def get_payroll_records():
     df_payroll = get_data_from_gsheets('payroll')
     df_employees = get_data_from_gsheets('employees')
 
-    if not df_payroll.empty:
-        st.dataframe(df_payroll, use_container_width=True)
-    else:
-        st.info("Tidak ada data penggajian.")
+    if df_payroll.empty or df_employees.empty:
+        return pd.DataFrame()
     
-    st.subheader("Input Data Gaji")
-    if not df_employees.empty:
-        employee_options = df_employees['username'].tolist()
+    df_employees['id'] = range(1, len(df_employees) + 1)
+    
+    df_payroll = df_payroll.merge(df_employees, left_on='employee_id', right_on='id', how='left')
+    
+    return df_payroll[['tanggal_waktu', 'gaji_bulan', 'nama_karyawan', 'gaji_akhir', 'keterangan']]
+
+def get_payroll_records_by_month(month_str):
+    df_payroll = get_data_from_gsheets('payroll')
+    df_employees = get_data_from_gsheets('employees')
+    
+    if df_payroll.empty or df_employees.empty:
+        return pd.DataFrame()
         
-        with st.form("form_penggajian", clear_on_submit=True):
-            employee_id = st.selectbox("Pilih Karyawan", employee_options)
-            pay_date = st.date_input("Tanggal Pembayaran", datetime.now())
-            amount = st.number_input("Jumlah Gaji", min_value=0, format="%d")
-            
-            if st.form_submit_button("Simpan Gaji"):
-                if append_row_to_gsheet('payroll', [employee_id, pay_date.strftime("%Y-%m-%d"), amount]):
-                    st.success("Data gaji berhasil disimpan!")
-                else:
-                    st.error("Gagal menyimpan data gaji.")
-    else:
-        st.warning("Tidak ada data karyawan. Tambahkan karyawan di Google Sheet 'employees' secara manual.")
-
-# --- MAIN APP LOGIC ---
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
-if 'page' not in st.session_state:
-    st.session_state['page'] = 'Login'
-
-if st.session_state['logged_in']:
-    st.sidebar.title("Aplikasi Stok")
-    if st.sidebar.button("Dashboard 🏠", use_container_width=True):
-        st.session_state['page'] = "Dashboard"
-        st.rerun()
-    if st.sidebar.button("Master Barang 📦", use_container_width=True):
-        st.session_state['page'] = "Master Barang"
-        st.rerun()
-    if st.sidebar.button("Barang Masuk 📥", use_container_width=True):
-        st.session_state['page'] = "Barang Masuk"
-        st.rerun()
-    if st.sidebar.button("Transaksi Keluar 🧾", use_container_width=True):
-        st.session_state['page'] = "Transaksi Keluar"
-        st.rerun()
-    if st.sidebar.button("Monitoring Stok 📊", use_container_width=True):
-        st.session_state['page'] = "Monitoring Stok"
-        st.rerun()
-    if st.sidebar.button("Penggajian 💰", use_container_width=True):
-        st.session_state['page'] = "Penggajian"
-        st.rerun()
+    df_employees['id'] = range(1, len(df_employees) + 1)
     
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Logout 🚪", use_container_width=True):
+    df_payroll = df_payroll[df_payroll['gaji_bulan'] == month_str]
+    
+    df_payroll = df_payroll.merge(df_employees, left_on='employee_id', right_on='id', how='left')
+    
+    return df_payroll
+
+def generate_payslips_pdf(payslip_df):
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    
+    for idx, row in payslip_df.iterrows():
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        
+        pdf.cell(0, 10, 'PT. BERKAT KARYA ANUGERAH', 0, 1, 'C')
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, 'SLIP GAJI', 0, 1, 'C')
+        pdf.ln(5)
+
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(40, 5, 'Nama Karyawan:', 0)
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, row['nama_karyawan'], 0, 1)
+
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(40, 5, 'Bagian:', 0)
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, row['bagian'], 0, 1)
+
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(40, 5, 'Gaji Bulan:', 0)
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, row['gaji_bulan'], 0, 1)
+
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, 'Pendapatan', 0, 1)
+        pdf.set_font("Arial", '', 10)
+        
+        # Pendapatan
+        pdf.cell(60, 5, 'Gaji Pokok', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['gaji_pokok']:,.2f}", 0, 1, 'R')
+        
+        pdf.cell(60, 5, 'Lembur', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['lembur']:,.2f}", 0, 1, 'R')
+        
+        pdf.cell(60, 5, 'Lembur Minggu', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['lembur_minggu']:,.2f}", 0, 1, 'R')
+        
+        pdf.cell(60, 5, 'Uang Makan', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['uang_makan']:,.2f}", 0, 1, 'R')
+
+        # Total 1
+        total1 = row['gaji_pokok'] + row['lembur'] + row['lembur_minggu'] + row['uang_makan']
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(60, 5, 'Total Pendapatan (1)', 'T', 0)
+        pdf.cell(5, 5, ':', 'T', 0)
+        pdf.cell(0, 5, f"Rp {total1:,.2f}", 'T', 1, 'R')
+
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, 'Potongan', 0, 1)
+        pdf.set_font("Arial", '', 10)
+        
+        # Potongan
+        pdf.cell(60, 5, 'Absen Finger', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['pot_absen_finger']:,.2f}", 0, 1, 'R')
+
+        pdf.cell(60, 5, 'Ijin HR', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['ijin_hr']:,.2f}", 0, 1, 'R')
+
+        # Total 2
+        total2 = total1 - row['pot_absen_finger'] - row['ijin_hr']
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(60, 5, 'Total Pendapatan Setelah Potongan Absen (2)', 'T', 0)
+        pdf.cell(5, 5, ':', 'T', 0)
+        pdf.cell(0, 5, f"Rp {total2:,.2f}", 'T', 1, 'R')
+
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, 'Potongan Lain-lain', 0, 1)
+        pdf.set_font("Arial", '', 10)
+
+        # Potongan Lain-lain
+        pdf.cell(60, 5, 'Simpanan Wajib', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['simpanan_wajib']:,.2f}", 0, 1, 'R')
+
+        pdf.cell(60, 5, 'Potongan Koperasi', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['potongan_koperasi']:,.2f}", 0, 1, 'R')
+
+        pdf.cell(60, 5, 'Kasbon', 0, 0)
+        pdf.cell(5, 5, ':', 0, 0)
+        pdf.cell(0, 5, f"Rp {row['kasbon']:,.2f}", 0, 1, 'R')
+        
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(60, 5, 'TOTAL GAJI AKHIR', 'T', 0)
+        pdf.cell(5, 5, ':', 'T', 0)
+        pdf.cell(0, 5, f"Rp {row['gaji_akhir']:,.2f}", 'T', 1, 'R')
+
+        pdf.ln(10)
+        pdf.set_font("Arial", '', 10)
+        pdf.cell(0, 5, f"Keterangan: {row['keterangan']}", 0, 1)
+        pdf.ln(15)
+        pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
+
+    return pdf.output(dest='S').encode('latin1')
+
+def show_dashboard():
+    st.title("Dashboard Bisnis 📈")
+    st.markdown("---")
+
+    master_df = get_master_barang()
+    
+    col_total_value, col_total_items = st.columns(2)
+    if not master_df.empty:
+        master_df['Stok Saat Ini'] = master_df.apply(lambda row: get_stock_balance(row['kode_bahan'], row['warna']), axis=1)
+        total_value = (master_df['Stok Saat Ini'] * master_df['harga']).sum()
+        total_items = master_df['Stok Saat Ini'].sum()
+
+        with col_total_value:
+            st.metric("Total Nilai Stok Saat Ini", f"Rp {total_value:,.2f}")
+        with col_total_items:
+            st.metric("Total Barang di Gudang", f"{int(total_items)} Unit")
+    else:
+        st.info("Belum ada master barang untuk ditampilkan di dashboard.")
+
+    st.markdown("---")
+    st.header("Stok 10 Item Terendah")
+    if not master_df.empty:
+        low_stock_df = master_df.sort_values(by='Stok Saat Ini', ascending=True).head(10)
+        low_stock_df['label'] = low_stock_df['nama_bahan'] + ' (' + low_stock_df['warna'] + ')'
+        
+        if not low_stock_df.empty:
+            fig = px.bar(low_stock_df, 
+                         x='label', 
+                         y='Stok Saat Ini',
+                         title='10 Item dengan Stok Terendah',
+                         labels={'label': 'Nama Bahan', 'Stok Saat Ini': 'Jumlah Stok'},
+                         color='Stok Saat Ini',
+                         color_continuous_scale=px.colors.sequential.Sunset
+                         )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Semua stok barang sudah habis.")
+    else:
+        st.info("Belum ada master barang untuk menampilkan grafik.")
+
+def show_master_barang():
+    st.title("Master Barang 📦")
+    st.markdown("---")
+    
+    tab_add, tab_list = st.tabs(["➕ Tambah Barang Baru", "📝 Daftar Barang & Kelola"])
+    
+    with tab_add:
+        with st.expander("Form Tambah Barang Baru", expanded=True):
+            with st.form("add_item_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    kode_bahan = st.text_input("Kode Bahan").upper()
+                    nama_supplier = st.text_input("Nama Supplier")
+                    warna = st.text_input("Warna").lower()
+                with col2:
+                    nama_bahan = st.text_input("Nama Bahan")
+                    rak = st.text_input("Rak")
+                    harga = st.number_input("Harga", min_value=0.0)
+                
+                submitted = st.form_submit_button("💾 Simpan Barang")
+                if submitted:
+                    if add_master_item(kode_bahan, nama_supplier, nama_bahan, warna, rak, harga):
+                        st.success(f"Barang **{nama_bahan}** dengan warna **{warna}** berhasil ditambahkan. ✅")
+                        st.rerun()
+                    else:
+                        st.error("Kombinasi Kode Bahan dan Warna tersebut sudah ada. ❌")
+    
+    with tab_list:
+        st.subheader("Daftar Barang")
+        df = get_master_barang()
+        if not df.empty:
+            df_display = df.copy()
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            with st.expander("Kelola Data Master"):
+                item_options_map = {f"{row['kode_bahan']} ({row['warna']})": (row['kode_bahan'], row['warna']) for _, row in df.iterrows()}
+                item_to_edit_str = st.selectbox("Pilih Kode Bahan (Warna)", list(item_options_map.keys()), key="select_edit_master")
+                
+                if item_to_edit_str:
+                    selected_kode, selected_warna = item_options_map[item_to_edit_str]
+                    
+                    filtered_df = df[(df['kode_bahan'] == selected_kode) & (df['warna'] == selected_warna)]
+
+                    if not filtered_df.empty:
+                        selected_row = filtered_df.iloc[0]
+                        
+                        with st.form("edit_master_form"):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                new_kode_bahan = st.text_input("Kode Bahan Baru", value=selected_row['kode_bahan']).upper()
+                                new_nama_bahan = st.text_input("Nama Bahan", value=selected_row['nama_bahan'])
+                                new_rak = st.text_input("Rak", value=selected_row['rak'])
+                            with col2:
+                                new_warna = st.text_input("Warna Baru", value=selected_row['warna']).lower()
+                                new_nama_supplier = st.text_input("Nama Supplier", value=selected_row['nama_supplier'])
+                                new_harga = st.number_input("Harga", value=selected_row['harga'], min_value=0.0)
+                                
+                            col_btn1, col_btn2 = st.columns(2)
+                            with col_btn1:
+                                if st.form_submit_button("Simpan Perubahan"):
+                                    if update_master_item(selected_row['kode_bahan'], selected_row['warna'], new_kode_bahan, new_warna, new_nama_supplier, new_nama_bahan, new_rak, new_harga):
+                                        st.success("Data berhasil diperbarui! ✅")
+                                        st.rerun()
+                                    else:
+                                        st.error("Kombinasi Kode Bahan dan Warna baru sudah ada. Gagal menyimpan perubahan. ❌")
+                            with col_btn2:
+                                if st.form_submit_button("Hapus Barang"):
+                                    if delete_master_item(selected_row['kode_bahan'], selected_row['warna']):
+                                        st.success("Data berhasil dihapus! 🗑️")
+                                        st.rerun()
+                                    else:
+                                        st.error("Gagal menghapus data.")
+                    else:
+                        st.warning("Data yang dipilih tidak ditemukan. Silakan refresh halaman atau pilih data lain.")
+        else:
+            st.info("Belum ada master barang.")
+
+def show_input_masuk():
+    st.title("Input Barang Masuk 📥")
+    st.markdown("---")
+    
+    master_df = get_master_barang()
+    if master_df.empty:
+        st.warning("Belum ada master barang. Silakan tambahkan di menu Master Barang. ⚠️")
+        return
+
+    tab_add, tab_list = st.tabs(["➕ Input Barang Masuk Baru", "📝 Daftar Barang Masuk & Kelola"])
+
+    with tab_add:
+        with st.expander("Form Input Barang Masuk", expanded=True):
+            with st.form("input_masuk_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    kode_bahan_options = master_df['kode_bahan'].unique().tolist()
+                    selected_kode_bahan = st.selectbox("Pilih Kode Bahan", kode_bahan_options, key="in_kode_bahan")
+                
+                with col2:
+                    filtered_colors = master_df[master_df['kode_bahan'] == selected_kode_bahan]['warna'].tolist()
+                    selected_warna = st.selectbox("Warna", filtered_colors, key="in_warna")
+                
+                stok = st.number_input("Stok", min_value=1, key="in_stok")
+                yard = st.number_input("Yard", min_value=0.0, key="in_yard")
+                keterangan = st.text_area("Keterangan", key="in_keterangan")
+                
+                submitted = st.form_submit_button("💾 Simpan Barang Masuk")
+                if submitted:
+                    tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    if add_barang_masuk(tanggal_waktu, selected_kode_bahan, selected_warna, stok, yard, keterangan):
+                        st.success("Barang masuk berhasil dicatat. ✅")
+                        st.rerun()
+                    else:
+                        st.error("Gagal menyimpan data barang masuk.")
+    
+    with tab_list:
+        st.subheader("Daftar Barang Masuk")
+        df = get_barang_masuk()
+        if not df.empty:
+            df['tanggal_waktu'] = pd.to_datetime(df['tanggal_waktu']).dt.strftime('%Y-%m-%d %H:%M:%S')
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            with st.expander("Kelola Data Barang Masuk"):
+                # Gsheets doesn't have a simple ID column, so we'll use a combination of fields as a unique identifier.
+                df_to_edit = df.copy()
+                df_to_edit['unique_key'] = df_to_edit['tanggal_waktu'] + ' - ' + df_to_edit['kode_bahan'] + ' - ' + df_to_edit['warna'] + ' - ' + df_to_edit['stok'].astype(str)
+                record_to_edit_str = st.selectbox("Pilih Data yang akan diedit/dihapus", df_to_edit['unique_key'].tolist(), key="select_edit_in")
+
+                if record_to_edit_str:
+                    selected_row = df_to_edit[df_to_edit['unique_key'] == record_to_edit_str].iloc[0]
+                    row_index = df_to_edit[df_to_edit['unique_key'] == record_to_edit_str].index.tolist()[0]
+                    
+                    with st.form("edit_in_form"):
+                        edit_tanggal_waktu = st.text_input("Tanggal & Waktu", value=selected_row['tanggal_waktu'])
+                        kode_bahan_options = master_df['kode_bahan'].unique().tolist()
+                        edit_kode_bahan = st.selectbox("Kode Bahan", kode_bahan_options, index=kode_bahan_options.index(selected_row['kode_bahan']), key="edit_in_kode")
+                        
+                        filtered_colors_edit = master_df[master_df['kode_bahan'] == edit_kode_bahan]['warna'].tolist()
+                        edit_warna = st.selectbox("Warna", filtered_colors_edit, index=filtered_colors_edit.index(selected_row['warna']), key="edit_in_warna")
+                        
+                        edit_stok = st.number_input("Stok", value=selected_row['stok'], min_value=1, key="edit_in_stok")
+                        edit_yard = st.number_input("Yard", value=selected_row['yard'], min_value=0.0, key="edit_in_yard")
+                        edit_keterangan = st.text_area("Keterangan", value=selected_row['keterangan'], key="edit_in_ket")
+
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.form_submit_button("Simpan Perubahan"):
+                                if update_row_in_gsheet('barang_masuk', row_index, [edit_tanggal_waktu, edit_kode_bahan, edit_warna, edit_stok, edit_yard, edit_keterangan]):
+                                    st.success("Data berhasil diperbarui! ✅")
+                                    st.rerun()
+                                else:
+                                    st.error("Gagal memperbarui data.")
+                        with col_btn2:
+                            if st.form_submit_button("Hapus Data"):
+                                if delete_row_from_gsheet('barang_masuk', row_index):
+                                    st.success("Data berhasil dihapus! 🗑️")
+                                    st.rerun()
+                                else:
+                                    st.error("Gagal menghapus data.")
+        else:
+            st.info("Belum ada data barang masuk.")
+
+def show_transaksi_keluar_invoice_page():
+    st.title("Transaksi Keluar (Penjualan) & Invoice 🧾")
+    st.markdown("---")
+    
+    tab_new_invoice, tab_history = st.tabs(["➕ Buat Transaksi & Invoice Baru", "📝 Riwayat Transaksi"])
+    
+    master_df = get_master_barang()
+    if master_df.empty:
+        st.warning("Belum ada master barang. Silakan tambahkan di menu Master Barang. ⚠️")
+        return
+
+    master_df['display_name'] = master_df['kode_bahan'] + ' - ' + master_df['nama_bahan'] + ' (' + master_df['warna'] + ')'
+    item_options = master_df['display_name'].tolist()
+
+    if 'cart_items' not in st.session_state:
+        st.session_state['cart_items'] = []
+    
+    with tab_new_invoice:
+        st.subheader("Formulir Transaksi Penjualan")
+        
+        with st.container(border=True):
+            col_item_select, col_add_btn = st.columns([0.8, 0.2])
+            with col_item_select:
+                item_to_add_str = st.selectbox("Pilih Item yang Akan Dijual", item_options, key="item_add_select")
+            with col_add_btn:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("➕ Tambah Item"):
+                    selected_item_data = master_df[master_df['display_name'] == item_to_add_str].iloc[0]
+                    new_item = {
+                        "kode_bahan": selected_item_data['kode_bahan'],
+                        "nama_bahan": selected_item_data['nama_bahan'],
+                        "warna": selected_item_data['warna'],
+                        "harga": selected_item_data['harga'],
+                        "qty": 0,
+                        "yard": 0,
+                        "keterangan": ""
+                    }
+                    st.session_state['cart_items'].append(new_item)
+                    st.rerun()
+
+        with st.form("new_transaction_form"):
+            customer_name = st.text_input("Nama Pelanggan", help="Wajib diisi", key="customer_name")
+            
+            st.markdown("---")
+            st.subheader("Keranjang Belanja 🛒")
+
+            total_invoice = 0
+            for i, item in enumerate(st.session_state['cart_items']):
+                with st.container(border=True):
+                    col_item_display, col_delete_btn = st.columns([0.9, 0.1])
+                    
+                    with col_item_display:
+                        st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
+                    
+                    with col_delete_btn:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("🗑️", key=f"delete_btn_{i}"):
+                            st.session_state['cart_items'].pop(i)
+                            st.rerun()
+                    
+                    stok_saat_ini = get_stock_balance(item['kode_bahan'], item['warna'])
+                    
+                    col_qty, col_yard = st.columns(2)
+                    with col_qty:
+                        min_val = 1 if stok_saat_ini > 0 else 0
+                        max_val = int(stok_saat_ini)
+                        st.session_state.cart_items[i]['qty'] = st.number_input(
+                            "Jumlah",
+                            min_value=min_val,
+                            max_value=max_val,
+                            value=int(st.session_state.cart_items[i].get('qty', 0)),
+                            key=f"qty_{i}"
+                        )
+                    
+                    with col_yard:
+                        st.session_state.cart_items[i]['yard'] = st.number_input(
+                            "Yard",
+                            min_value=0.0,
+                            key=f"yard_input_{i}"
+                        )
+                    
+                    st.session_state.cart_items[i]['keterangan'] = st.text_area(f"Keterangan (opsional)", value=st.session_state.cart_items[i].get('keterangan', ''), key=f"keterangan_{i}")
+                    
+                    current_item_total = st.session_state.cart_items[i]['qty'] * st.session_state.cart_items[i]['harga']
+                    st.session_state.cart_items[i]['total'] = current_item_total
+                    total_invoice += current_item_total
+                    
+                    st.markdown(f"**Harga Satuan:** Rp {st.session_state.cart_items[i]['harga']:,.2f}")
+                    st.markdown(f"**Total Harga Item:** Rp {current_item_total:,.2f}")
+                
+            st.markdown(f"### **Total Keseluruhan:** **Rp {total_invoice:,.2f}**")
+            
+            submitted = st.form_submit_button("💾 Simpan Transaksi & Buat Invoice")
+            if submitted:
+                if not customer_name:
+                    st.error("Nama Pelanggan wajib diisi.")
+                elif not st.session_state['cart_items'] or all(item['qty'] == 0 for item in st.session_state['cart_items']):
+                    st.error("Mohon tambahkan setidaknya satu item dengan jumlah lebih dari 0.")
+                else:
+                    new_invoice_number = generate_invoice_number()
+                    success, message = add_barang_keluar_and_invoice(new_invoice_number, customer_name, st.session_state['cart_items'])
+                    if success:
+                        st.success(f"{message} Nomor Invoice: **{new_invoice_number}** ✅")
+                        st.balloons()
+                        st.session_state['cart_items'] = [] # Reset cart
+                        st.rerun()
+                    else:
+                        st.error(message + " ❌")
+                        
+    with tab_history:
+        st.subheader("Riwayat Transaksi")
+        invoices_df = get_invoices()
+        if not invoices_df.empty:
+            invoices_df['tanggal_waktu'] = pd.to_datetime(invoices_df['tanggal_waktu']).dt.strftime('%Y-%m-%d %H:%M:%S')
+            invoices_df.rename(columns={'invoice_number': 'No Invoice', 'tanggal_waktu': 'Tanggal & Waktu', 'customer_name': 'Nama Pelanggan'}, inplace=True)
+            
+            st.dataframe(invoices_df, use_container_width=True, hide_index=True)
+            
+            selected_invoice = st.selectbox("Pilih No Invoice untuk Dilihat/Unduh", invoices_df['No Invoice'].tolist())
+            
+            if st.button("Tampilkan & Unduh Invoice"):
+                invoice_data = invoices_df[invoices_df['No Invoice'] == selected_invoice].iloc[0]
+                invoice_items_df = get_invoice_items(selected_invoice)
+
+                st.subheader(f"Detail Invoice: {selected_invoice}")
+                st.write(f"**Nama Pelanggan:** {invoice_data['Nama Pelanggan']}")
+                st.write(f"**Tanggal:** {invoice_data['Tanggal & Waktu']}")
+                st.dataframe(invoice_items_df[['nama_bahan', 'qty', 'harga', 'total']].rename(columns={
+                    'nama_bahan': 'Nama Bahan',
+                    'qty': 'Qty',
+                    'harga': 'Harga',
+                    'total': 'Total'
+                }), use_container_width=True, hide_index=True)
+
+                pdf_file = generate_invoice_pdf(invoice_data, invoice_items_df)
+                st.download_button(
+                    label="Unduh Invoice PDF 📥",
+                    data=pdf_file,
+                    file_name=f"invoice_{selected_invoice}.pdf",
+                    mime="application/pdf"
+                )
+        else:
+            st.info("Belum ada riwayat transaksi.")
+
+def show_monitoring_stok():
+    st.title("Monitoring Stok 📊")
+    st.markdown("---")
+    
+    st.subheader("Stok Saat Ini")
+    master_df = get_master_barang()
+    if not master_df.empty:
+        master_df['Stok Saat Ini'] = master_df.apply(lambda row: get_stock_balance(row['kode_bahan'], row['warna']), axis=1)
+        df_display = master_df[['kode_bahan', 'nama_bahan', 'warna', 'Stok Saat Ini']].copy()
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+    else:
+        st.warning("Belum ada master barang.")
+
+    st.markdown("---")
+    st.subheader("Rekam Jejak Stok (In & Out)")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Tanggal Mulai", value=datetime.now().date())
+    with col2:
+        end_date = st.date_input("Tanggal Selesai", value=datetime.now().date())
+        
+    if st.button("Tampilkan Rekam Jejak"):
+        records_df = get_in_out_records(start_date, end_date)
+        if not records_df.empty:
+            st.dataframe(records_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Tidak ada catatan stok masuk atau keluar pada rentang tanggal tersebut.")
+
+def show_payroll_page():
+    st.title("Sistem Penggajian Karyawan 💰")
+    st.markdown("---")
+    
+    tab_master, tab_process, tab_history = st.tabs(["👥 Master Karyawan", "💸 Proses Penggajian", "📝 Riwayat Penggajian"])
+
+    with tab_master:
+        st.subheader("Data Master Karyawan")
+        
+        with st.expander("➕ Tambah Karyawan Baru", expanded=False):
+            with st.form("add_employee_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    nama = st.text_input("Nama Karyawan")
+                with col2:
+                    bagian = st.text_input("Bagian")
+                gaji = st.number_input("Gaji Pokok", min_value=0.0)
+                
+                submitted = st.form_submit_button("Tambah Karyawan")
+                if submitted:
+                    if nama and bagian and gaji > 0:
+                        if add_employee(nama, bagian, gaji):
+                            st.success(f"Karyawan {nama} berhasil ditambahkan. ✅")
+                            st.rerun()
+                        else:
+                            st.error("Gagal menambahkan karyawan. Nama karyawan mungkin sudah ada.")
+                    else:
+                        st.error("Semua field wajib diisi. ❌")
+
+        st.markdown("---")
+        st.subheader("Daftar Karyawan")
+        employees_df_master = get_employees()
+        if not employees_df_master.empty:
+            st.dataframe(employees_df_master, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            with st.expander("Kelola Data Karyawan"):
+                selected_employee_name = st.selectbox("Pilih Nama Karyawan", employees_df_master['nama_karyawan'].tolist(), key='master_edit_select')
+                
+                selected_row = employees_df_master[employees_df_master['nama_karyawan'] == selected_employee_name].iloc[0]
+                
+                with st.form("edit_employee_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        edit_nama = st.text_input("Nama", value=selected_row['nama_karyawan'])
+                    with col2:
+                        edit_bagian = st.text_input("Bagian", value=selected_row['bagian'])
+                    edit_gaji = st.number_input("Gaji Pokok", value=selected_row['gaji_pokok'], min_value=0.0)
+                    
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        if st.form_submit_button("Simpan Perubahan"):
+                            if update_employee(selected_employee_name, edit_nama, edit_bagian, edit_gaji):
+                                st.success("Data karyawan berhasil diperbarui! ✅")
+                                st.rerun()
+                            else:
+                                st.error("Gagal memperbarui data. Nama karyawan mungkin sudah ada.")
+                    with col_btn2:
+                        if st.form_submit_button("Hapus Karyawan"):
+                            if delete_employee(selected_employee_name):
+                                st.success("Karyawan berhasil dihapus. 🗑️")
+                                st.rerun()
+                            else:
+                                st.error("Gagal menghapus karyawan.")
+        else:
+            st.info("Belum ada data karyawan.")
+
+    with tab_process:
+        st.subheader("Proses Penggajian Bulanan")
+        employees_df = get_employees()
+        if employees_df.empty:
+            st.warning("Tambahkan data karyawan terlebih dahulu di tab 'Master Karyawan'. ⚠️")
+        else:
+            # Gsheets doesn't have an ID column by default. We'll simulate it for this session.
+            employees_df['id'] = range(1, len(employees_df) + 1)
+            employee_options = employees_df.apply(lambda row: f"{int(row['id'])} - {row['nama_karyawan']} ({row['bagian']})", axis=1).tolist()
+            selected_employee_str = st.selectbox("Pilih Karyawan", employee_options)
+            
+            if selected_employee_str:
+                employee_id = int(selected_employee_str.split(' - ')[0])
+                selected_employee_data = employees_df[employees_df['id'] == employee_id].iloc[0]
+                
+                with st.form("payroll_form"):
+                    st.write(f"**Nama:** {selected_employee_data['nama_karyawan']}")
+                    st.write(f"**Bagian:** {selected_employee_data['bagian']}")
+
+                    selected_date = st.date_input("Pilih Tanggal Gaji", value=datetime.now().date())
+                    gaji_bulan = selected_date.strftime('%B %Y')
+                    
+                    st.markdown("### Pendapatan")
+                    st.number_input("Gaji Pokok", value=selected_employee_data['gaji_pokok'], key="gaji_pokok_input", disabled=True)
+                    lembur = st.number_input("Lembur", min_value=0.0)
+                    lembur_minggu = st.number_input("Lembur Minggu", min_value=0.0)
+                    uang_makan = st.number_input("Uang Makan", min_value=0.0)
+                    
+                    total_pendapatan = selected_employee_data['gaji_pokok'] + lembur + lembur_minggu + uang_makan
+                    st.markdown(f"**Total Pendapatan (1):** **Rp {total_pendapatan:,.2f}**")
+                    
+                    st.markdown("### Potongan")
+                    pot_absen_finger = st.number_input("Potongan Absen Finger", min_value=0.0)
+                    ijin_hr = st.number_input("Ijin HR", min_value=0.0)
+                    
+                    total_setelah_potongan1 = total_pendapatan - pot_absen_finger - ijin_hr
+                    st.markdown(f"**Total Setelah Potongan Absen (2):** **Rp {total_setelah_potongan1:,.2f}**")
+                    
+                    st.markdown("### Potongan Lain-lain")
+                    simpanan_wajib = st.number_input("Simpanan Wajib", min_value=0.0)
+                    potongan_koperasi = st.number_input("Potongan Koperasi", min_value=0.0)
+                    kasbon = st.number_input("Kasbon", min_value=0.0)
+
+                    gaji_akhir = total_setelah_potongan1 - simpanan_wajib - potongan_koperasi - kasbon
+                    
+                    st.markdown(f"### **TOTAL GAJI AKHIR:** **Rp {gaji_akhir:,.2f}**")
+                    
+                    keterangan = st.text_area("Keterangan", help="Opsional")
+                    
+                    submitted = st.form_submit_button("💾 Simpan Gaji")
+                    if submitted:
+                        if add_payroll_record(employee_id, gaji_bulan, selected_employee_data['gaji_pokok'], lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan):
+                            st.success(f"Penggajian untuk {selected_employee_data['nama_karyawan']} berhasil dicatat. ✅")
+                            st.rerun()
+                        else:
+                            st.error("Gagal menyimpan data gaji.")
+
+    with tab_history:
+        st.subheader("Riwayat Penggajian")
+        
+        st.markdown("### Unduh Semua Slip Gaji (PDF)")
+        payroll_df_all = get_data_from_gsheets('payroll')
+        if not payroll_df_all.empty:
+            payroll_months = payroll_df_all['gaji_bulan'].unique().tolist()
+            selected_month = st.selectbox("Pilih Bulan Gaji", payroll_months)
+            
+            if st.button(f"Unduh Slip Gaji {selected_month}"):
+                payslip_data = get_payroll_records_by_month(selected_month)
+                if not payslip_data.empty:
+                    pdf_file = generate_payslips_pdf(payslip_data)
+                    st.download_button(
+                        label="Unduh PDF 📥",
+                        data=pdf_file,
+                        file_name=f"slip_gaji_{selected_month.replace(' ', '_')}.pdf",
+                        mime="application/pdf"
+                    )
+                else:
+                    st.error("Data penggajian tidak ditemukan untuk bulan tersebut. ❌")
+        else:
+            st.info("Tidak ada riwayat penggajian untuk diunduh.")
+
+        st.markdown("---")
+        st.subheader("Tabel Riwayat Penggajian")
+        payroll_df = get_payroll_records()
+        if not payroll_df.empty:
+            month_mapping = {
+                'January': 'Januari', 'February': 'Februari', 'March': 'Maret',
+                'April': 'April', 'May': 'Mei', 'June': 'Juni',
+                'July': 'Juli', 'August': 'Agustus', 'September': 'September',
+                'October': 'Oktober', 'November': 'November', 'December': 'Desember'
+            }
+            
+            payroll_df['tanggal_waktu'] = pd.to_datetime(payroll_df['tanggal_waktu'])
+            payroll_df['tanggal_waktu'] = payroll_df['tanggal_waktu'].dt.strftime('%d %B %Y')
+            
+            for en, idn in month_mapping.items():
+                payroll_df['tanggal_waktu'] = payroll_df['tanggal_waktu'].str.replace(en, idn)
+            
+            st.dataframe(payroll_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Belum ada riwayat penggajian.")
+
+# --- Login & Main App Logic ---
+def login_page():
+    st.title("Login Sistem Kontrol Stok")
+    with st.form("login_form"):
+        st.subheader("Silakan Masuk")
+        username = st.text_input("Nama Pengguna")
+        password = st.text_input("Kata Sandi", type="password")
+        submitted = st.form_submit_button("Login")
+        if submitted:
+            if check_login(username, password):
+                st.session_state['logged_in'] = True
+                st.session_state['page'] = 'Dashboard'
+                st.success("Berhasil Login! ✅")
+                st.rerun()
+            else:
+                st.error("Nama pengguna atau kata sandi salah. ❌")
+
+def main():
+    if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
         st.session_state['page'] = 'Login'
-        st.rerun()
     
-    if 'sheets_checked' not in st.session_state:
-        check_and_create_worksheets()
-        st.session_state['sheets_checked'] = True
+    st.sidebar.title("PT. BERKAT KARYA ANUGERAH")
+    st.sidebar.markdown("---")
 
-    if st.session_state['page'] == "Dashboard":
-        show_dashboard()
-    elif st.session_state['page'] == "Master Barang":
-        show_master_barang()
-    elif st.session_state['page'] == "Barang Masuk":
-        show_input_masuk()
-    elif st.session_state['page'] == "Transaksi Keluar":
-        show_transaksi_keluar_invoice_page()
-    elif st.session_state['page'] == "Monitoring Stok":
-        show_monitoring_stok()
-    elif st.session_state['page'] == "Penggajian":
-        show_penggajian()
-else:
-    show_login_page()
+    if st.session_state['logged_in']:
+        if 'sheets_checked' not in st.session_state:
+            check_and_create_worksheets()
+            st.session_state['sheets_checked'] = True
+
+        if st.sidebar.button("Dashboard 📈", use_container_width=True):
+            st.session_state['page'] = "Dashboard"
+            st.rerun()
+        if st.sidebar.button("Master Barang 📦", use_container_width=True):
+            st.session_state['page'] = "Master Barang"
+            st.rerun()
+        if st.sidebar.button("Barang Masuk 📥", use_container_width=True):
+            st.session_state['page'] = "Barang Masuk"
+            st.rerun()
+        if st.sidebar.button("Transaksi Keluar 🧾", use_container_width=True):
+            st.session_state['page'] = "Transaksi Keluar"
+            st.rerun()
+        if st.sidebar.button("Monitoring Stok 📊", use_container_width=True):
+            st.session_state['page'] = "Monitoring Stok"
+            st.rerun()
+        if st.sidebar.button("Penggajian 💰", use_container_width=True):
+            st.session_state['page'] = "Penggajian"
+            st.rerun()
+        
+        st.sidebar.markdown("---")
+        if st.sidebar.button("Logout 🚪", use_container_width=True):
+            st.session_state['logged_in'] = False
+            st.session_state['page'] = 'Login'
+            st.rerun()
+        
+        if st.session_state['page'] == "Dashboard":
+            show_dashboard()
+        elif st.session_state['page'] == "Master Barang":
+            show_master_barang()
+        elif st.session_state['page'] == "Barang Masuk":
+            show_input_masuk()
+        elif st.session_state['page'] == "Transaksi Keluar":
+            show_transaksi_keluar_invoice_page()
+        elif st.session_state['page'] == "Monitoring Stok":
+            show_monitoring_stok()
+        elif st.session_state['page'] == "Penggajian":
+            show_payroll_page()
+    else:
+        login_page()
+
+if __name__ == "__main__":
+    main()

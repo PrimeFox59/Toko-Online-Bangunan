@@ -426,7 +426,7 @@ def get_payroll_records_by_month(month_str):
     df_payroll = df_payroll.merge(df_employees, left_on='employee_id', right_on='id', how='left')
     
     return df_payroll
-
+ 
 def generate_payslips_pdf(payslip_df):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     
@@ -824,16 +824,26 @@ def show_transaksi_keluar_invoice_page():
                         
                         col_qty, col_yard = st.columns(2)
                         with col_qty:
-                            min_val = 1 if stok_saat_ini > 0 else 0
-                            max_val = int(stok_saat_ini)
-                            current_qty = int(st.session_state.cart_items[i].get('qty', 0))
-                            st.session_state.cart_items[i]['qty'] = st.number_input(
-                                "Jumlah",
-                                min_value=min_val,
-                                max_value=max_val,
-                                value=current_qty,
-                                key=f"qty_{i}"
+                            # PERBAIKAN: Ganti st.number_input dengan st.text_input dan tambahkan validasi
+                            qty_str = st.text_input(
+                                "Jumlah", 
+                                value=str(st.session_state.cart_items[i].get('qty', 0)),
+                                key=f"qty_input_{i}"
                             )
+                            # PERBAIKAN: Tambahkan try-except untuk validasi input
+                            try:
+                                qty = int(qty_str)
+                                if qty < 1:
+                                    st.warning("Kuantitas harus lebih besar dari 0.")
+                                    qty = 0 # Atur ke 0 jika tidak valid
+                                if qty > stok_saat_ini:
+                                    st.warning(f"Stok tidak cukup. Stok saat ini: {int(stok_saat_ini)}")
+                                    qty = int(stok_saat_ini)
+                            except ValueError:
+                                st.warning("Masukkan angka yang valid untuk kuantitas.")
+                                qty = 0 # Atur ke 0 jika input bukan angka
+                            
+                            st.session_state.cart_items[i]['qty'] = qty
                         
                         with col_yard:
                             current_yard = float(st.session_state.cart_items[i].get('yard', 0.0))

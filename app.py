@@ -5,8 +5,8 @@ from fpdf import FPDF
 import io
 import bcrypt
 import plotly.express as px
-from streamlit_gsheets import GSheetsConnection
 import gspread
+from gspread.exceptions import WorksheetNotFound
 
 # --- CUSTOM CSS FOR UI/UX IMPROVEMENTS ---
 st.markdown("""
@@ -55,7 +55,6 @@ st.markdown("""
 
 # --- GOOGLE SHEETS CONNECTION & SETUP ---
 try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
     creds = st.secrets["connections"]["gsheets"]
     gc = gspread.service_account_from_dict(creds)
     sh = gc.open_by_key(st.secrets["connections"]["gsheets"]["spreadsheet"].split('/')[-2])
@@ -67,7 +66,7 @@ except Exception as e:
 def get_worksheet(sheet_name):
     try:
         return sh.worksheet(sheet_name)
-    except gspread.WorksheetNotFound:
+    except WorksheetNotFound:
         return None
 
 def check_and_create_worksheets():
@@ -96,7 +95,6 @@ def get_data_from_gsheets(sheet_name):
     if worksheet:
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
-        # Drop rows where all columns are empty
         df = df.replace('', pd.NA).dropna(how='all')
         return df
     return pd.DataFrame()
@@ -131,7 +129,6 @@ def authenticate(username, password):
     user = users_df[users_df['username'] == username]
     if not user.empty:
         stored_password_hash = user.iloc[0]['password']
-        # Note: In a real app, hash the password upon creation. This is for demonstration.
         return password == stored_password_hash
     return False
 
@@ -179,8 +176,11 @@ def show_dashboard():
 
     st.subheader("Tren Barang Masuk & Keluar (Bulan)")
     if not df_masuk.empty and not df_keluar.empty:
-        df_masuk['bulan'] = pd.to_datetime(df_masuk['tanggal_masuk']).dt.to_period('M')
-        df_keluar['bulan'] = pd.to_datetime(df_keluar['tanggal_keluar']).dt.to_period('M')
+        df_masuk['tanggal_masuk'] = pd.to_datetime(df_masuk['tanggal_masuk'])
+        df_keluar['tanggal_keluar'] = pd.to_datetime(df_keluar['tanggal_keluar'])
+
+        df_masuk['bulan'] = df_masuk['tanggal_masuk'].dt.to_period('M')
+        df_keluar['bulan'] = df_keluar['tanggal_keluar'].dt.to_period('M')
         
         trend_masuk = df_masuk.groupby('bulan')['jumlah_masuk'].sum().reset_index()
         trend_keluar = df_keluar.groupby('bulan')['jumlah_keluar'].sum().reset_index()
@@ -335,13 +335,10 @@ def show_transaksi_keluar_invoice_page():
                 price_per_item = int(item_details['harga'])
                 total_price = quantity * price_per_item
                 
-                # Update barang_keluar sheet
                 if append_row_to_gsheet('barang_keluar', [datetime.now().strftime("%Y-%m-%d"), selected_item, quantity, selected_invoice]):
-                    # Add item to invoice_items sheet
                     if append_row_to_gsheet('invoice_items', [selected_invoice, selected_item, quantity, price_per_item, total_price]):
                         st.success(f"Item {selected_item} berhasil ditambahkan ke Invoice {selected_invoice}.")
                         
-                        # Update total amount in invoices sheet
                         df_invoice_items = get_data_from_gsheets('invoice_items')
                         invoice_total = df_invoice_items[df_invoice_items['invoice_number'] == selected_invoice]['total_price'].sum()
                         
@@ -354,7 +351,6 @@ def show_transaksi_keluar_invoice_page():
                 else:
                     st.error("Gagal menyimpan data barang keluar.")
     
-    # PDF functionality (simplified, adjust as needed)
     st.subheader("Cetak Invoice")
     if not df_invoices.empty:
         invoice_to_print = st.selectbox("Pilih Invoice untuk Dicetak", df_invoices['invoice_number'].tolist())
@@ -392,7 +388,6 @@ def generate_pdf(invoice_number):
         def chapter_body(self, data, is_table=False):
             self.set_font('Arial', '', 10)
             if is_table:
-                # Add table headers
                 self.set_fill_color(200, 220, 255)
                 self.cell(30, 7, 'Kode Bahan', 1, 0, 'C', 1)
                 self.cell(60, 7, 'Nama Bahan', 1, 0, 'C', 1)
@@ -400,7 +395,6 @@ def generate_pdf(invoice_number):
                 self.cell(40, 7, 'Harga Satuan', 1, 0, 'C', 1)
                 self.cell(40, 7, 'Total', 1, 1, 'C', 1)
 
-                # Add table data
                 for index, row in data.iterrows():
                     nama_bahan = df_master[df_master['kode_bahan'] == row['kode_bahan']]['nama_bahan'].iloc[0]
                     self.cell(30, 7, str(row['kode_bahan']), 1, 0)
@@ -416,15 +410,12 @@ def generate_pdf(invoice_number):
     pdf.add_page()
     pdf.set_font('Arial', '', 12)
 
-    # Invoice details
     pdf.chapter_title(f"Invoice # {invoice_details['invoice_number']}")
     pdf.chapter_body(f"Customer: {invoice_details['customer_name']}\nDate: {invoice_details['invoice_date']}\n")
 
-    # Invoice items table
     pdf.chapter_title("Items")
     pdf.chapter_body(invoice_items, is_table=True)
 
-    # Total
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, f"Total Amount: Rp{invoice_details['total_amount']:,}", 0, 1, 'R')
@@ -525,7 +516,6 @@ if st.session_state['logged_in']:
         st.session_state['page'] = 'Login'
         st.rerun()
     
-    # Run a one-time check for worksheets at startup
     if 'sheets_checked' not in st.session_state:
         check_and_create_worksheets()
         st.session_state['sheets_checked'] = True

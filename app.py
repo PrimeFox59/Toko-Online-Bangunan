@@ -1,12 +1,14 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
 from datetime import datetime
 from fpdf import FPDF
 import io
 import bcrypt
 import plotly.express as px
-import gspread
-from gspread.exceptions import WorksheetNotFound
+
+# --- PAGE CONFIG ---
+st.set_page_config(layout="wide", page_title="PT. BERKAT KARYA ANUGERAH")
 
 # --- CUSTOM CSS FOR UI/UX IMPROVEMENTS ---
 st.markdown("""
@@ -38,242 +40,240 @@ st.markdown("""
     h1, h2, h3, h4, h5, h6 {
         color: #2F3E50;
     }
-    .st-emotion-cache-1av5400 {
-        background-color: #FFFFFF;
-        padding: 2rem;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
-    .st-emotion-cache-1av5400 h3 {
-        color: #172B4D;
-    }
-    .st-emotion-cache-1av5400 .st-cc {
-        color: #172B4D;
-    }
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
         font-size: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- GOOGLE SHEETS CONNECTION & SETUP ---
-def get_gsheet_connection():
-    try:
-        creds = st.secrets["connections"]["gsheets"]
-        gc = gspread.service_account_from_dict(creds)
-        sh = gc.open_by_key(st.secrets["connections"]["gsheets"]["spreadsheet"].split('/')[-2])
-        return sh
-    except Exception as e:
-        st.error(f"Gagal terhubung ke Google Sheets. Pastikan file secrets.toml sudah benar dan API Google Sheets/Drive telah diaktifkan: {e}")
-        st.stop()
-    return None
-
-sh = get_gsheet_connection()
-
-# --- UTILITY FUNCTIONS ---
-def get_worksheet(sheet_name):
-    try:
-        return sh.worksheet(sheet_name)
-    except WorksheetNotFound:
-        return None
-
-def check_and_create_worksheets():
-    """Checks for required worksheets and creates them with headers if they don't exist."""
-    required_worksheets = {
-        "users": ['username', 'password_hash', 'role'],
-        "master_barang": ['kode_bahan', 'nama_supplier', 'nama_bahan', 'warna', 'rak', 'harga'],
-        "barang_masuk": ['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'],
-        "barang_keluar": ['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'],
-        "invoices": ['invoice_number', 'tanggal_waktu', 'customer_name'],
-        "invoice_items": ['invoice_number', 'kode_bahan', 'nama_bahan', 'qty', 'harga', 'total'],
-        "employees": ['nama_karyawan', 'bagian', 'gaji_pokok'],
-        "payroll": ['tanggal_waktu', 'gaji_bulan', 'employee_id', 'gaji_pokok', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir', 'keterangan']
-    }
-
-    existing_worksheets = [ws.title for ws in sh.worksheets()]
+# --- Database Initialization ---
+def init_db():
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT
+        )
+    ''')
+    # Check if 'owner' user exists, if not, create it
+    c.execute("SELECT 1 FROM users WHERE username = 'owner'")
+    if c.fetchone() is None:
+        hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), bcrypt.gensalt())
+        c.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", ('owner', hashed_password))
     
-    for ws_name, headers in required_worksheets.items():
-        if ws_name not in existing_worksheets:
-            st.warning(f"Worksheet '{ws_name}' tidak ditemukan. Membuat sekarang...")
-            new_ws = sh.add_worksheet(title=ws_name, rows="1000", cols="20")
-            new_ws.append_row(headers)
-            st.success(f"Worksheet '{ws_name}' berhasil dibuat dengan header.")
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS master_barang (
+            kode_bahan TEXT,
+            nama_supplier TEXT,
+            nama_bahan TEXT,
+            warna TEXT,
+            rak TEXT,
+            harga REAL,
+            PRIMARY KEY (kode_bahan, warna)
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS barang_masuk (
+            id INTEGER PRIMARY KEY,
+            tanggal_waktu TEXT,
+            kode_bahan TEXT,
+            warna TEXT,
+            stok INTEGER,
+            yard REAL,
+            keterangan TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS barang_keluar (
+            id INTEGER PRIMARY KEY,
+            tanggal_waktu TEXT,
+            kode_bahan TEXT,
+            warna TEXT,
+            stok INTEGER,
+            yard REAL,
+            keterangan TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS invoices (
+            invoice_number TEXT PRIMARY KEY,
+            tanggal_waktu TEXT,
+            customer_name TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS invoice_items (
+            id INTEGER PRIMARY KEY,
+            invoice_number TEXT,
+            kode_bahan TEXT,
+            nama_bahan TEXT,
+            qty INTEGER,
+            harga REAL,
+            total REAL,
+            FOREIGN KEY(invoice_number) REFERENCES invoices(invoice_number)
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS employees (
+            id INTEGER PRIMARY KEY,
+            nama_karyawan TEXT NOT NULL,
+            bagian TEXT,
+            gaji_pokok REAL
+        )
+    ''')
 
-# PERBAIKAN: MENAMBAHKAN CACHING UNTUK MENGURANGI PANGGILAN API
-@st.cache_data(ttl=600)  # Cache data selama 10 menit
-def get_data_from_gsheets(sheet_name):
-    worksheet = get_worksheet(sheet_name)
-    if worksheet:
-        data = worksheet.get_all_records()
-        df = pd.DataFrame(data)
-        # Drop rows that are all empty, which can happen with get_all_records
-        df = df.replace('', pd.NA).dropna(how='all')
-        return df
-    return pd.DataFrame()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS payroll (
+            id INTEGER PRIMARY KEY,
+            tanggal_waktu TEXT,
+            gaji_bulan TEXT,
+            employee_id INTEGER,
+            gaji_pokok REAL,
+            lembur REAL,
+            lembur_minggu REAL,
+            uang_makan REAL,
+            pot_absen_finger REAL,
+            ijin_hr REAL,
+            simpanan_wajib REAL,
+            potongan_koperasi REAL,
+            kasbon REAL,
+            gaji_akhir REAL,
+            keterangan TEXT,
+            FOREIGN KEY(employee_id) REFERENCES employees(id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-def append_row_to_gsheet(sheet_name, data_list):
-    worksheet = get_worksheet(sheet_name)
-    if worksheet:
-        worksheet.append_row(data_list)
-        st.cache_data.clear() # PERBAIKAN: Hapus cache setelah menulis
-        return True
-    return False
-
-def update_row_in_gsheet(sheet_name, row_index, data_list):
-    worksheet = get_worksheet(sheet_name)
-    if worksheet:
-        worksheet.update(f"A{row_index+2}", [data_list])
-        st.cache_data.clear() # PERBAIKAN: Hapus cache setelah menulis
-        return True
-    return False
-
-def delete_row_from_gsheet(sheet_name, row_index):
-    worksheet = get_worksheet(sheet_name)
-    if worksheet:
-        worksheet.delete_rows(row_index+2)
-        st.cache_data.clear() # PERBAIKAN: Hapus cache setelah menulis
-        return True
-    return False
-
-# --- AUTHENTICATION FUNCTIONS ---
-def get_user_data():
-    return get_data_from_gsheets('users')
-
+# --- Authentication ---
 def check_login(username, password):
-    users_df = get_user_data()
-    user = users_df[users_df['username'] == username]
-    if not user.empty:
-        stored_password_hash = user.iloc[0]['password_hash']
-        # This part is a bit tricky with gsheets.
-        # bcrypt hash is a binary object. gsheets stores it as a string.
-        # We'll just do a simple password check for simplicity.
-        # For production, a more robust solution would be needed.
-        return password == stored_password_hash
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("SELECT password_hash FROM users WHERE username = ?", (username,))
+    hashed_password = c.fetchone()
+    conn.close()
+    if hashed_password:
+        return bcrypt.checkpw(password.encode('utf-8'), hashed_password[0])
     return False
-
-def check_and_create_owner():
-    users_df = get_data_from_gsheets('users')
-    if users_df.empty or 'owner' not in users_df['username'].tolist():
-        st.warning("Pengguna 'owner' tidak ditemukan. Membuat sekarang...")
-        # Note: In a real-world app, you'd want to hash this password.
-        # But to simplify for gsheets, we'll store it as plain text.
-        # For a robust solution, you would need to hash the password before storing it.
-        if append_row_to_gsheet('users', ['owner', 'owner123', 'admin']):
-            st.success("Pengguna 'owner' berhasil dibuat.")
 
 # --- CRUD Functions - Inventory ---
 def add_master_item(kode, supplier, nama, warna, rak, harga):
-    df_master = get_data_from_gsheets('master_barang')
-    if not df_master.empty and ((df_master['kode_bahan'] == kode) & (df_master['warna'] == warna)).any():
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO master_barang VALUES (?, ?, ?, ?, ?, ?)", 
+                  (kode, supplier, nama, warna, rak, harga))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
         return False
-    return append_row_to_gsheet('master_barang', [kode, supplier, nama, warna, rak, harga])
+    finally:
+        conn.close()
 
 def get_master_barang():
-    df = get_data_from_gsheets('master_barang')
-    if not df.empty:
-        df['harga'] = pd.to_numeric(df['harga'], errors='coerce').fillna(0)
+    conn = sqlite3.connect('stock_control.db')
+    df = pd.read_sql_query("SELECT * FROM master_barang", conn)
+    conn.close()
     return df
 
 def update_master_item(old_kode, old_warna, new_kode, new_warna, supplier, nama, rak, harga):
-    df_master = get_master_barang() # Use the function that returns a clean df
-    row_index = df_master.index[(df_master['kode_bahan'] == old_kode) & (df_master['warna'] == old_warna)].tolist()
-    if not row_index:
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    try:
+        if (new_kode != old_kode or new_warna != old_warna):
+            c.execute("SELECT 1 FROM master_barang WHERE kode_bahan=? AND warna=?", (new_kode, new_warna))
+            if c.fetchone():
+                return False
+        
+        if new_kode != old_kode or new_warna != old_warna:
+            c.execute("DELETE FROM master_barang WHERE kode_bahan=? AND warna=?", (old_kode, old_warna))
+            c.execute("INSERT INTO master_barang VALUES (?, ?, ?, ?, ?, ?)",
+                      (new_kode, supplier, nama, new_warna, rak, harga))
+        else:
+            c.execute("UPDATE master_barang SET nama_supplier=?, nama_bahan=?, rak=?, harga=? WHERE kode_bahan=? AND warna=?", 
+                      (supplier, nama, rak, harga, new_kode, new_warna))
+        
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
         return False
-    
-    row_index = row_index[0]
-    
-    # Check for duplicate key combination
-    if (new_kode != old_kode or new_warna != old_warna):
-        if ((df_master['kode_bahan'] == new_kode) & (df_master['warna'] == new_warna)).any():
-            return False
-
-    return update_row_in_gsheet('master_barang', row_index, [new_kode, supplier, nama, new_warna, rak, harga])
+    finally:
+        conn.close()
 
 def delete_master_item(kode, warna):
-    df_master = get_data_from_gsheets('master_barang')
-    row_index = df_master.index[(df_master['kode_bahan'] == kode) & (df_master['warna'] == warna)].tolist()
-    if not row_index:
-        return False
-    return delete_row_from_gsheet('master_barang', row_index[0])
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM master_barang WHERE kode_bahan=? AND warna=?", (kode, warna))
+    conn.commit()
+    conn.close()
 
 def add_barang_masuk(tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
-    return append_row_to_gsheet('barang_masuk', [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("INSERT INTO barang_masuk (tanggal_waktu, kode_bahan, warna, stok, yard, keterangan) VALUES (?, ?, ?, ?, ?, ?)", 
+              (tanggal_waktu, kode_bahan, warna, stok, yard, keterangan))
+    conn.commit()
+    conn.close()
 
 def get_barang_masuk():
-    df = get_data_from_gsheets('barang_masuk')
-    if df.empty:
-        # Perbaikan: Buat DataFrame kosong dengan kolom yang dibutuhkan
-        return pd.DataFrame(columns=['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'])
-
-    df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0).astype(int)
-    df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
+    conn = sqlite3.connect('stock_control.db')
+    df = pd.read_sql_query("SELECT * FROM barang_masuk", conn)
+    conn.close()
     return df
 
-def update_barang_masuk(row_index, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
-    return update_row_in_gsheet('barang_masuk', row_index, [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
+def update_barang_masuk(id, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("UPDATE barang_masuk SET tanggal_waktu=?, kode_bahan=?, warna=?, stok=?, yard=?, keterangan=? WHERE id=?", 
+              (tanggal_waktu, kode_bahan, warna, stok, yard, keterangan, id))
+    conn.commit()
+    conn.close()
 
-def delete_barang_masuk(row_index):
-    return delete_row_from_gsheet('barang_masuk', row_index)
+def delete_barang_masuk(id):
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM barang_masuk WHERE id=?", (id,))
+    conn.commit()
+    conn.close()
 
 def get_stock_balance(kode_bahan, warna):
-    df_in = get_barang_masuk()
-    df_out = get_barang_keluar()
-    
-    # Perbaikan: Periksa apakah DataFrame memiliki kolom sebelum melakukan filter
-    if not df_in.empty:
-        in_stock = df_in[(df_in['kode_bahan'] == kode_bahan) & (df_in['warna'] == warna)]['stok'].sum()
-    else:
-        in_stock = 0
-    
-    if not df_out.empty:
-        out_stock = df_out[(df_out['kode_bahan'] == kode_bahan) & (df_out['warna'] == warna)]['stok'].sum()
-    else:
-        out_stock = 0
-
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("SELECT SUM(stok) FROM barang_masuk WHERE kode_bahan=? AND warna=?", (kode_bahan, warna))
+    in_stock = c.fetchone()[0] or 0
+    c.execute("SELECT SUM(stok) FROM barang_keluar WHERE kode_bahan=? AND warna=?", (kode_bahan, warna))
+    out_stock = c.fetchone()[0] or 0
+    conn.close()
     return in_stock - out_stock
 
 def get_in_out_records(start_date, end_date):
-    df_in = get_barang_masuk()
-    df_out = get_barang_keluar()
-    
-    if df_in.empty and df_out.empty:
-        return pd.DataFrame()
-
-    if not df_in.empty:
-        df_in['tanggal_waktu'] = pd.to_datetime(df_in['tanggal_waktu'])
-        df_in = df_in[(df_in['tanggal_waktu'].dt.date >= start_date) & (df_in['tanggal_waktu'].dt.date <= end_date)]
-        df_in = df_in.assign(qty=df_in['stok'], type='Masuk', keterangan=df_in['keterangan'])
-    
-    if not df_out.empty:
-        df_out['tanggal_waktu'] = pd.to_datetime(df_out['tanggal_waktu'])
-        df_out = df_out[(df_out['tanggal_waktu'].dt.date >= start_date) & (df_out['tanggal_waktu'].dt.date <= end_date)]
-        df_out = df_out.assign(qty=df_out['stok'], type='Keluar', keterangan=df_out['keterangan'])
-    
-    df = pd.concat([df_in[['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan']], 
-                    df_out[['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan']]], ignore_index=True)
-    
+    conn = sqlite3.connect('stock_control.db')
+    in_df = pd.read_sql_query("SELECT tanggal_waktu, kode_bahan, warna, stok as qty, 'Masuk' as type, keterangan FROM barang_masuk WHERE tanggal_waktu BETWEEN ? AND ?", conn, params=(start_date, end_date))
+    out_df = pd.read_sql_query("SELECT tanggal_waktu, kode_bahan, warna, stok as qty, 'Keluar' as type, keterangan FROM barang_keluar WHERE tanggal_waktu BETWEEN ? AND ?", conn, params=(start_date, end_date))
+    df = pd.concat([in_df, out_df], ignore_index=True)
+    df['tanggal_waktu'] = pd.to_datetime(df['tanggal_waktu'])
     df = df.sort_values(by='tanggal_waktu')
+    conn.close()
     return df
 
 # --- Invoice Functions ---
 def get_invoices():
-    return get_data_from_gsheets('invoices')
+    conn = sqlite3.connect('stock_control.db')
+    df = pd.read_sql_query("SELECT * FROM invoices ORDER BY tanggal_waktu DESC", conn)
+    conn.close()
+    return df
 
 def get_invoice_items(invoice_number):
-    df_items = get_data_from_gsheets('invoice_items')
-    if not df_items.empty:
-        df_items['harga'] = pd.to_numeric(df_items['harga'], errors='coerce').fillna(0)
-        df_items['total'] = pd.to_numeric(df_items['total'], errors='coerce').fillna(0)
-    return df_items[df_items['invoice_number'] == invoice_number]
+    conn = sqlite3.connect('stock_control.db')
+    df = pd.read_sql_query("SELECT * FROM invoice_items WHERE invoice_number=?", conn, params=(invoice_number,))
+    conn.close()
+    return df
 
 def get_barang_keluar():
-    df = get_data_from_gsheets('barang_keluar')
-    if df.empty:
-        # Perbaikan: Buat DataFrame kosong dengan kolom yang dibutuhkan
-        return pd.DataFrame(columns=['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'])
-
-    df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0).astype(int)
-    df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
+    conn = sqlite3.connect('stock_control.db')
+    df = pd.read_sql_query("SELECT * FROM barang_keluar", conn)
+    conn.close()
     return df
     
 def generate_invoice_pdf(invoice_data, invoice_items):
@@ -323,109 +323,142 @@ def generate_invoice_pdf(invoice_data, invoice_items):
     return pdf.output(dest='S').encode('latin1')
     
 def generate_invoice_number():
-    df_invoices = get_invoices()
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
     today_date = datetime.now().strftime('%y%m%d')
     prefix = f"INV-{today_date}-"
     
-    if not df_invoices.empty:
-        df_invoices = df_invoices[df_invoices['invoice_number'].str.startswith(prefix)]
-        if not df_invoices.empty:
-            last_invoice = df_invoices['invoice_number'].max()
-            last_seq = int(last_invoice.split('-')[-1])
-            new_seq = last_seq + 1
-        else:
-            new_seq = 1
+    # Get the last invoice number for today
+    c.execute("SELECT MAX(invoice_number) FROM invoices WHERE invoice_number LIKE ?", (f"{prefix}%",))
+    last_invoice = c.fetchone()[0]
+    
+    if last_invoice:
+        last_seq = int(last_invoice.split('-')[-1])
+        new_seq = last_seq + 1
     else:
         new_seq = 1
         
     new_invoice_number = f"{prefix}{new_seq:03d}"
+    conn.close()
     return new_invoice_number
 
 def add_barang_keluar_and_invoice(invoice_number, customer_name, items):
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
     tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # Check stock before starting transactions
-    for item in items:
-        current_stock = get_stock_balance(item['kode_bahan'], item['warna'])
-        if item['qty'] > current_stock:
-            return False, f"Stok untuk bahan {item['nama_bahan']} ({item['warna']}) tidak mencukupi. Stok saat ini: {current_stock}"
+    try:
+        # Insert into invoices table
+        c.execute("INSERT INTO invoices (invoice_number, tanggal_waktu, customer_name) VALUES (?, ?, ?)",
+                  (invoice_number, tanggal_waktu, customer_name))
 
-    # Insert into invoices table
-    if not append_row_to_gsheet('invoices', [invoice_number, tanggal_waktu, customer_name]):
-        return False, "Gagal membuat invoice."
-    
-    # Insert items and outgoing goods
-    for item in items:
-        if not append_row_to_gsheet('invoice_items', [invoice_number, item['kode_bahan'], item['nama_bahan'], item['qty'], item['harga'], item['total']]):
-            return False, "Gagal menambahkan item ke invoice."
-        if not append_row_to_gsheet('barang_keluar', [tanggal_waktu, item['kode_bahan'], item['warna'], item['qty'], item['yard'], item['keterangan']]):
-            return False, "Gagal mencatat barang keluar."
-    
-    return True, "Transaksi berhasil dicatat dan invoice dibuat."
+        for item in items:
+            # Check stock
+            current_stock = get_stock_balance(item['kode_bahan'], item['warna'])
+            if item['qty'] > current_stock:
+                conn.rollback()
+                return False, f"Stok untuk bahan {item['nama_bahan']} ({item['warna']}) tidak mencukupi. Stok saat ini: {current_stock}"
+
+            # Insert into invoice_items table
+            c.execute("INSERT INTO invoice_items (invoice_number, kode_bahan, nama_bahan, qty, harga, total) VALUES (?, ?, ?, ?, ?, ?)",
+                      (invoice_number, item['kode_bahan'], item['nama_bahan'], item['qty'], item['harga'], item['total']))
+
+            # Insert into barang_keluar table
+            c.execute("INSERT INTO barang_keluar (tanggal_waktu, kode_bahan, warna, stok, yard, keterangan) VALUES (?, ?, ?, ?, ?, ?)", 
+                      (tanggal_waktu, item['kode_bahan'], item['warna'], item['qty'], item['yard'], item['keterangan']))
+        
+        conn.commit()
+        return True, "Transaksi berhasil dicatat dan invoice dibuat."
+
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        return False, f"Error: {e}"
+    finally:
+        conn.close()
 
 # --- Payroll Functions ---
 def add_employee(nama, bagian, gaji):
-    df_employees = get_employees()
-    # Check if employee already exists to avoid duplicates
-    if not df_employees.empty and (df_employees['nama_karyawan'] == nama).any():
-        return False
-    return append_row_to_gsheet('employees', [nama, bagian, gaji])
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("INSERT INTO employees (nama_karyawan, bagian, gaji_pokok) VALUES (?, ?, ?)", (nama, bagian, gaji))
+    conn.commit()
+    conn.close()
 
 def get_employees():
-    df = get_data_from_gsheets('employees')
-    if not df.empty:
-        df['gaji_pokok'] = pd.to_numeric(df['gaji_pokok'], errors='coerce').fillna(0)
+    conn = sqlite3.connect('stock_control.db')
+    df = pd.read_sql_query("SELECT * FROM employees", conn)
+    conn.close()
     return df
 
-def update_employee(old_name, new_nama, new_bagian, new_gaji):
-    df_employees = get_employees()
-    row_index = df_employees.index[df_employees['nama_karyawan'] == old_name].tolist()
-    if not row_index:
-        return False
-    return update_row_in_gsheet('employees', row_index[0], [new_nama, new_bagian, new_gaji])
+def update_employee(employee_id, nama, bagian, gaji):
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("UPDATE employees SET nama_karyawan=?, bagian=?, gaji_pokok=? WHERE id=?", (nama, bagian, gaji, employee_id))
+    conn.commit()
+    conn.close()
 
-def delete_employee(nama):
-    df_employees = get_employees()
-    row_index = df_employees.index[df_employees['nama_karyawan'] == nama].tolist()
-    if not row_index:
-        return False
-    return delete_row_from_gsheet('employees', row_index[0])
+def delete_employee(employee_id):
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM employees WHERE id=?", (id,))
+    conn.commit()
+    conn.close()
 
 def add_payroll_record(employee_id, gaji_bulan, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan):
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
     tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    return append_row_to_gsheet('payroll', [tanggal_waktu, gaji_bulan, employee_id, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan])
+    c.execute("INSERT INTO payroll (tanggal_waktu, gaji_bulan, employee_id, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+              (tanggal_waktu, gaji_bulan, employee_id, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan))
+    conn.commit()
+    conn.close()
 
 def get_payroll_records():
-    df_payroll = get_data_from_gsheets('payroll')
-    df_employees = get_employees()
-
-    if df_payroll.empty or df_employees.empty:
-        return pd.DataFrame()
-    
-    df_employees['id'] = range(1, len(df_employees) + 1)
-    
-    df_payroll = df_payroll.merge(df_employees, left_on='employee_id', right_on='id', how='left')
-    
-    return df_payroll[['tanggal_waktu', 'gaji_bulan', 'nama_karyawan', 'gaji_akhir', 'keterangan']]
+    conn = sqlite3.connect('stock_control.db')
+    query = """
+    SELECT 
+        p.id, 
+        p.tanggal_waktu, 
+        p.gaji_bulan,
+        e.nama_karyawan, 
+        p.gaji_akhir,
+        p.keterangan
+    FROM payroll p
+    JOIN employees e ON p.employee_id = e.id
+    ORDER BY p.tanggal_waktu DESC
+    """
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
 
 def get_payroll_records_by_month(month_str):
-    df_payroll = get_data_from_gsheets('payroll')
-    df_employees = get_employees()
-    
-    if df_payroll.empty or df_employees.empty:
-        return pd.DataFrame()
-        
-    df_employees['id'] = range(1, len(df_employees) + 1)
-    
-    df_payroll = df_payroll[df_payroll['gaji_bulan'] == month_str]
-    
-    # Perbaikan: Pastikan kolom numerik dikonversi sebelum diolah
-    for col in ['gaji_pokok', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir']:
-        df_payroll[col] = pd.to_numeric(df_payroll[col], errors='coerce').fillna(0)
-    
-    df_payroll = df_payroll.merge(df_employees, left_on='employee_id', right_on='id', how='left')
-    
-    return df_payroll
+    conn = sqlite3.connect('stock_control.db')
+    query = """
+    SELECT 
+        p.id, 
+        p.tanggal_waktu, 
+        p.gaji_bulan,
+        e.nama_karyawan, 
+        e.bagian,
+        p.gaji_pokok,
+        p.lembur,
+        p.lembur_minggu,
+        p.uang_makan,
+        p.pot_absen_finger,
+        p.ijin_hr,
+        p.simpanan_wajib,
+        p.potongan_koperasi,
+        p.kasbon,
+        p.gaji_akhir,
+        p.keterangan
+    FROM payroll p
+    JOIN employees e ON p.employee_id = e.id
+    WHERE p.gaji_bulan = ?
+    ORDER BY p.tanggal_waktu DESC
+    """
+    df = pd.read_sql_query(query, conn, params=(month_str,))
+    conn.close()
+    return df
 
 def generate_payslips_pdf(payslip_df):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
@@ -458,7 +491,7 @@ def generate_payslips_pdf(payslip_df):
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 10, 'Pendapatan', 0, 1)
         pdf.set_font("Arial", '', 10)
-        
+
         # Pendapatan
         pdf.cell(60, 5, 'Gaji Pokok', 0, 0)
         pdf.cell(5, 5, ':', 0, 0)
@@ -493,7 +526,7 @@ def generate_payslips_pdf(payslip_df):
         pdf.cell(5, 5, ':', 0, 0)
         pdf.cell(0, 5, f"Rp {row['pot_absen_finger']:,.2f}", 0, 1, 'R')
 
-        pdf.cell(60, 5, 'Ijin HR', 0, 0)
+        pdf.cell(60, 5, 'Izin HR', 0, 0)
         pdf.cell(5, 5, ':', 0, 0)
         pdf.cell(0, 5, f"Rp {row['ijin_hr']:,.2f}", 0, 1, 'R')
 
@@ -544,9 +577,6 @@ def show_dashboard():
     
     col_total_value, col_total_items = st.columns(2)
     if not master_df.empty:
-        # Perbaikan: Konversi harga ke numerik
-        master_df['harga'] = pd.to_numeric(master_df['harga'], errors='coerce').fillna(0)
-        
         master_df['Stok Saat Ini'] = master_df.apply(lambda row: get_stock_balance(row['kode_bahan'], row['warna']), axis=1)
         total_value = (master_df['Stok Saat Ini'] * master_df['harga']).sum()
         total_items = master_df['Stok Saat Ini'].sum()
@@ -573,11 +603,12 @@ def show_dashboard():
                          color='Stok Saat Ini',
                          color_continuous_scale=px.colors.sequential.Sunset
                          )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("Semua stok barang sudah habis.")
     else:
         st.info("Belum ada master barang untuk menampilkan grafik.")
+
 
 def show_master_barang():
     st.title("Master Barang 📦")
@@ -611,23 +642,32 @@ def show_master_barang():
         df = get_master_barang()
         if not df.empty:
             df_display = df.copy()
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            df_display.rename(columns={
+                'kode_bahan': 'Kode Bahan',
+                'nama_supplier': 'Nama Supplier',
+                'nama_bahan': 'Nama Bahan',
+                'warna': 'Warna',
+                'rak': 'Rak',
+                'harga': 'Harga'
+            }, inplace=True)
+            st.dataframe(df_display, width='stretch', hide_index=True)
             
             st.markdown("---")
             with st.expander("Kelola Data Master"):
+                # Buat dictionary untuk memetakan nama tampilan ke data asli
                 item_options_map = {f"{row['kode_bahan']} ({row['warna']})": (row['kode_bahan'], row['warna']) for _, row in df.iterrows()}
                 item_to_edit_str = st.selectbox("Pilih Kode Bahan (Warna)", list(item_options_map.keys()), key="select_edit_master")
                 
                 if item_to_edit_str:
+                    # Ambil kode_bahan dan warna yang benar dari dictionary
                     selected_kode, selected_warna = item_options_map[item_to_edit_str]
                     
+                    # Gunakan kode dan warna yang sudah dijamin benar untuk memfilter DataFrame
                     filtered_df = df[(df['kode_bahan'] == selected_kode) & (df['warna'] == selected_warna)]
 
                     if not filtered_df.empty:
                         selected_row = filtered_df.iloc[0]
                         
-                        harga_value = float(selected_row['harga']) if pd.notna(selected_row['harga']) else 0.0
-
                         with st.form("edit_master_form"):
                             col1, col2 = st.columns(2)
                             with col1:
@@ -637,7 +677,7 @@ def show_master_barang():
                             with col2:
                                 new_warna = st.text_input("Warna Baru", value=selected_row['warna']).lower()
                                 new_nama_supplier = st.text_input("Nama Supplier", value=selected_row['nama_supplier'])
-                                new_harga = st.number_input("Harga", value=harga_value, min_value=0.0)
+                                new_harga = st.number_input("Harga", value=selected_row['harga'], min_value=0.0)
                                 
                             col_btn1, col_btn2 = st.columns(2)
                             with col_btn1:
@@ -649,11 +689,9 @@ def show_master_barang():
                                         st.error("Kombinasi Kode Bahan dan Warna baru sudah ada. Gagal menyimpan perubahan. ❌")
                             with col_btn2:
                                 if st.form_submit_button("Hapus Barang"):
-                                    if delete_master_item(selected_row['kode_bahan'], selected_row['warna']):
-                                        st.success("Data berhasil dihapus! 🗑️")
-                                        st.rerun()
-                                    else:
-                                        st.error("Gagal menghapus data.")
+                                    delete_master_item(selected_row['kode_bahan'], selected_row['warna'])
+                                    st.success("Data berhasil dihapus! 🗑️")
+                                    st.rerun()
                     else:
                         st.warning("Data yang dipilih tidak ditemukan. Silakan refresh halaman atau pilih data lain.")
         else:
@@ -689,66 +727,68 @@ def show_input_masuk():
                 submitted = st.form_submit_button("💾 Simpan Barang Masuk")
                 if submitted:
                     tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    if add_barang_masuk(tanggal_waktu, selected_kode_bahan, selected_warna, stok, yard, keterangan):
-                        st.success("Barang masuk berhasil dicatat. ✅")
-                        st.rerun()
-                    else:
-                        st.error("Gagal menyimpan data barang masuk.")
+                    add_barang_masuk(tanggal_waktu, selected_kode_bahan, selected_warna, stok, yard, keterangan)
+                    st.success("Barang masuk berhasil dicatat. ✅")
+                    st.rerun()
     
     with tab_list:
         st.subheader("Daftar Barang Masuk")
         df = get_barang_masuk()
         if not df.empty:
             df['tanggal_waktu'] = pd.to_datetime(df['tanggal_waktu']).dt.strftime('%Y-%m-%d %H:%M:%S')
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            df.rename(columns={
+                'tanggal_waktu': 'Tanggal & Waktu',
+                'kode_bahan': 'Kode Bahan',
+                'warna': 'Warna',
+                'stok': 'Stok',
+                'yard': 'Yard',
+                'keterangan': 'Keterangan'
+            }, inplace=True)
+            st.dataframe(df.drop('id', axis=1), width='stretch', hide_index=True)
 
             st.markdown("---")
             with st.expander("Kelola Data Barang Masuk"):
-                # Gsheets doesn't have a simple ID column, so we'll use a combination of fields as a unique identifier.
-                df_to_edit = df.copy()
-                df_to_edit['unique_key'] = df_to_edit['tanggal_waktu'] + ' - ' + df_to_edit['kode_bahan'] + ' - ' + df_to_edit['warna'] + ' - ' + df_to_edit['stok'].astype(str)
-                record_to_edit_str = st.selectbox("Pilih Data yang akan diedit/dihapus", df_to_edit['unique_key'].tolist(), key="select_edit_in")
-
-                if record_to_edit_str:
-                    selected_row = df_to_edit[df_to_edit['unique_key'] == record_to_edit_str].iloc[0]
-                    row_index = df_to_edit[df_to_edit['unique_key'] == record_to_edit_str].index.tolist()[0]
+                record_to_edit = st.selectbox("Pilih ID Data", df['id'].tolist(), key="select_edit_in")
+                selected_row = df[df['id'] == record_to_edit].iloc[0]
+                
+                with st.form("edit_in_form"):
+                    edit_tanggal_waktu = st.text_input("Tanggal & Waktu", value=selected_row['Tanggal & Waktu'])
+                    kode_bahan_options = master_df['kode_bahan'].unique().tolist()
+                    edit_kode_bahan = st.selectbox("Kode Bahan", kode_bahan_options, index=kode_bahan_options.index(selected_row['Kode Bahan']), key="edit_in_kode")
                     
-                    with st.form("edit_in_form"):
-                        edit_tanggal_waktu = st.text_input("Tanggal & Waktu", value=selected_row['tanggal_waktu'])
-                        kode_bahan_options = master_df['kode_bahan'].unique().tolist()
-                        edit_kode_bahan = st.selectbox("Kode Bahan", kode_bahan_options, index=kode_bahan_options.index(selected_row['kode_bahan']), key="edit_in_kode")
-                        
-                        filtered_colors_edit = master_df[master_df['kode_bahan'] == edit_kode_bahan]['warna'].tolist()
-                        edit_warna = st.selectbox("Warna", filtered_colors_edit, index=filtered_colors_edit.index(selected_row['warna']), key="edit_in_warna")
-                        
-                        # PERBAIKAN: Menggunakan int() dan min_value=0
-                        stok_value = int(selected_row['stok']) if pd.notna(selected_row['stok']) else 0
-                        yard_value = float(selected_row['yard']) if pd.notna(selected_row['yard']) else 0.0
+                    filtered_colors_edit = master_df[master_df['kode_bahan'] == edit_kode_bahan]['warna'].tolist()
+                    edit_warna = st.selectbox("Warna", filtered_colors_edit, index=filtered_colors_edit.index(selected_row['Warna']), key="edit_in_warna")
+                    
+                    edit_stok = st.number_input("Stok", value=selected_row['Stok'], min_value=1, key="edit_in_stok")
+                    edit_yard = st.number_input("Yard", value=selected_row['Yard'], min_value=0.0, key="edit_in_yard")
+                    edit_keterangan = st.text_area("Keterangan", value=selected_row['Keterangan'], key="edit_in_ket")
 
-                        edit_stok = st.number_input("Stok", value=stok_value, min_value=0, key="edit_in_stok")
-                        edit_yard = st.number_input("Yard", value=yard_value, min_value=0.0, key="edit_in_yard")
-                        
-                        # PERBAIKAN: Tangani nilai NaN dari kolom keterangan
-                        keterangan_value = str(selected_row['keterangan']) if pd.notna(selected_row['keterangan']) else ""
-                        edit_keterangan = st.text_area("Keterangan", value=keterangan_value, key="edit_in_ket")
-
-                        col_btn1, col_btn2 = st.columns(2)
-                        with col_btn1:
-                            if st.form_submit_button("Simpan Perubahan"):
-                                if update_barang_masuk(row_index, edit_tanggal_waktu, edit_kode_bahan, edit_warna, edit_stok, edit_yard, edit_keterangan):
-                                    st.success("Data berhasil diperbarui! ✅")
-                                    st.rerun()
-                                else:
-                                    st.error("Gagal memperbarui data.")
-                        with col_btn2:
-                            if st.form_submit_button("Hapus Data"):
-                                if delete_barang_masuk(row_index):
-                                    st.success("Data berhasil dihapus! 🗑️")
-                                    st.rerun()
-                                else:
-                                    st.error("Gagal menghapus data.")
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        if st.form_submit_button("Simpan Perubahan"):
+                            update_barang_masuk(record_to_edit, edit_tanggal_waktu, edit_kode_bahan, edit_warna, edit_stok, edit_yard, edit_keterangan)
+                            st.success("Data berhasil diperbarui! ✅")
+                            st.rerun()
+                    with col_btn2:
+                        if st.form_submit_button("Hapus Data"):
+                            delete_barang_masuk(record_to_edit)
+                            st.success("Data berhasil dihapus! 🗑️")
+                            st.rerun()
         else:
             st.info("Belum ada data barang masuk.")
+
+# --- Helper function to get unique yards ---
+def get_unique_yards_for_item(kode_bahan, warna):
+    conn = sqlite3.connect('stock_control.db')
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT yard FROM barang_masuk WHERE kode_bahan=? AND warna=?", (kode_bahan, warna))
+    yards_in = [row[0] for row in c.fetchall()]
+    c.execute("SELECT DISTINCT yard FROM barang_keluar WHERE kode_bahan=? AND warna=?", (kode_bahan, warna))
+    yards_out = [row[0] for row in c.fetchall()]
+    conn.close()
+    
+    unique_yards = sorted(list(set(yards_in + yards_out)))
+    return unique_yards
 
 def show_transaksi_keluar_invoice_page():
     st.title("Transaksi Keluar (Penjualan) & Invoice 🧾")
@@ -766,93 +806,101 @@ def show_transaksi_keluar_invoice_page():
 
     if 'cart_items' not in st.session_state:
         st.session_state['cart_items'] = []
-    
+
     with tab_new_invoice:
         st.subheader("Formulir Transaksi Penjualan")
-
-        # Use a separate container for adding items
+        
+        # Form untuk menambah item baru ke keranjang - di luar st.form utama
         with st.container(border=True):
-            with st.form("add_item_form"):
-                col_item_select, col_add_btn = st.columns([0.8, 0.2])
-                with col_item_select:
-                    item_to_add_str = st.selectbox("Pilih Item yang Akan Dijual", item_options, key="item_add_select")
-                with col_add_btn:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    add_item_submitted = st.form_submit_button("➕ Tambah Item")
-                
-                if add_item_submitted:
+            col_item_select, col_add_btn = st.columns([0.8, 0.2])
+            with col_item_select:
+                item_to_add_str = st.selectbox("Pilih Item yang Akan Dijual", item_options, key="item_add_select")
+            with col_add_btn:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("➕ Tambah Item"):
                     selected_item_data = master_df[master_df['display_name'] == item_to_add_str].iloc[0]
-                    harga_cleaned = float(selected_item_data['harga']) if pd.notna(selected_item_data['harga']) else 0.0
+                    # Get the current stock to set initial qty
+                    current_stock = get_stock_balance(selected_item_data['kode_bahan'], selected_item_data['warna'])
+                    # Set initial qty to 1 if stock is available, else 0
+                    initial_qty = 1 if current_stock > 0 else 0
+                    
                     new_item = {
                         "kode_bahan": selected_item_data['kode_bahan'],
                         "nama_bahan": selected_item_data['nama_bahan'],
                         "warna": selected_item_data['warna'],
-                        "harga": harga_cleaned,
-                        "qty": 0,
-                        "yard": 0.0,
+                        "harga": selected_item_data['harga'],
+                        "qty": initial_qty,
+                        "yard": 0,
                         "keterangan": ""
                     }
                     st.session_state['cart_items'].append(new_item)
                     st.rerun()
 
-        st.subheader("Keranjang Belanja 🛒")
-        
-        # PERBAIKAN: Move delete button logic outside the form
-        if 'cart_items' in st.session_state:
-            for i, item in enumerate(st.session_state['cart_items']):
+        # Start the single main form for transaction submission
+        with st.form("new_transaction_form"):
+            customer_name = st.text_input("Nama Pelanggan", help="Wajib diisi", key="customer_name")
+            
+            st.markdown("---")
+            st.subheader("Keranjang Belanja 🛒")
+
+            total_invoice = 0
+            
+            # Use a copy of the list for iteration if you plan to modify it
+            for i in range(len(st.session_state['cart_items'])):
+                item = st.session_state['cart_items'][i]
                 with st.container(border=True):
                     col_item_display, col_delete_btn = st.columns([0.9, 0.1])
                     
                     with col_item_display:
                         st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
-                    
                     with col_delete_btn:
-                        if st.button("🗑️", key=f"delete_btn_{i}"):
+                        if st.button("❌", key=f"delete_btn_{i}"):
                             st.session_state['cart_items'].pop(i)
                             st.rerun()
 
-        # The main transaction form
-        with st.form("new_transaction_form"):
-            customer_name = st.text_input("Nama Pelanggan", help="Wajib diisi", key="customer_name")
-            
-            total_invoice = 0
-            if 'cart_items' in st.session_state:
-                for i, item in enumerate(st.session_state['cart_items']):
-                    with st.container(border=True):
-                        st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
-                        stok_saat_ini = get_stock_balance(item['kode_bahan'], item['warna'])
+                    stok_saat_ini = get_stock_balance(item['kode_bahan'], item['warna'])
+                    
+                    col_qty, col_yard = st.columns(2)
+                    with col_qty:
+                        min_val = 1 if stok_saat_ini > 0 else 0
+                        max_val = int(stok_saat_ini)
+                        current_qty_in_state = st.session_state.cart_items[i].get('qty', min_val)
                         
-                        col_qty, col_yard = st.columns(2)
-                        with col_qty:
-                            min_val = 1 if stok_saat_ini > 0 else 0
-                            max_val = int(stok_saat_ini)
-                            current_qty = int(st.session_state.cart_items[i].get('qty', 0))
-                            st.session_state.cart_items[i]['qty'] = st.number_input(
-                                "Jumlah",
-                                min_value=min_val,
-                                max_value=max_val,
-                                value=current_qty,
-                                key=f"qty_{i}"
-                            )
+                        st.session_state.cart_items[i]['qty'] = st.number_input(
+                            "Jumlah",
+                            min_value=min_val,
+                            max_value=max_val,
+                            value=current_qty_in_state,
+                            key=f"qty_{i}"
+                        )
+                    
+                    with col_yard:
+                        unique_yards = get_unique_yards_for_item(item['kode_bahan'], item['warna'])
+                        yard_options = ["(Input Baru)"] + [str(y) for y in unique_yards]
                         
-                        with col_yard:
-                            current_yard = float(st.session_state.cart_items[i].get('yard', 0.0))
+                        selected_yard_str = st.selectbox(
+                            "Pilih Yard",
+                            yard_options,
+                            key=f"yard_select_{i}"
+                        )
+
+                        if selected_yard_str == "(Input Baru)":
                             st.session_state.cart_items[i]['yard'] = st.number_input(
-                                "Yard",
+                                "Input Yard Baru",
                                 min_value=0.0,
-                                value=current_yard,
                                 key=f"yard_input_{i}"
                             )
-                        
-                        current_keterangan = str(st.session_state.cart_items[i].get('keterangan', ''))
-                        st.session_state.cart_items[i]['keterangan'] = st.text_area(f"Keterangan (opsional)", value=current_keterangan, key=f"keterangan_{i}")
-                        
-                        current_item_total = st.session_state.cart_items[i]['qty'] * st.session_state.cart_items[i]['harga']
-                        st.session_state.cart_items[i]['total'] = current_item_total
-                        total_invoice += current_item_total
-                        
-                        st.markdown(f"**Harga Satuan:** Rp {st.session_state.cart_items[i]['harga']:,.2f}")
-                        st.markdown(f"**Total Harga Item:** Rp {current_item_total:,.2f}")
+                        else:
+                            st.session_state.cart_items[i]['yard'] = float(selected_yard_str)
+                    
+                    st.session_state.cart_items[i]['keterangan'] = st.text_area(f"Keterangan (opsional)", value=st.session_state.cart_items[i].get('keterangan', ''), key=f"keterangan_{i}")
+                    
+                    current_item_total = st.session_state.cart_items[i]['qty'] * st.session_state.cart_items[i]['harga']
+                    st.session_state.cart_items[i]['total'] = current_item_total
+                    total_invoice += current_item_total
+                    
+                    st.markdown(f"**Harga Satuan:** Rp {st.session_state.cart_items[i]['harga']:,.2f}")
+                    st.markdown(f"**Total Harga Item:** Rp {current_item_total:,.2f}")
                 
             st.markdown(f"### **Total Keseluruhan:** **Rp {total_invoice:,.2f}**")
             
@@ -880,7 +928,7 @@ def show_transaksi_keluar_invoice_page():
             invoices_df['tanggal_waktu'] = pd.to_datetime(invoices_df['tanggal_waktu']).dt.strftime('%Y-%m-%d %H:%M:%S')
             invoices_df.rename(columns={'invoice_number': 'No Invoice', 'tanggal_waktu': 'Tanggal & Waktu', 'customer_name': 'Nama Pelanggan'}, inplace=True)
             
-            st.dataframe(invoices_df, use_container_width=True, hide_index=True)
+            st.dataframe(invoices_df, width='stretch', hide_index=True)
             
             selected_invoice = st.selectbox("Pilih No Invoice untuk Dilihat/Unduh", invoices_df['No Invoice'].tolist())
             
@@ -896,7 +944,7 @@ def show_transaksi_keluar_invoice_page():
                     'qty': 'Qty',
                     'harga': 'Harga',
                     'total': 'Total'
-                }), use_container_width=True, hide_index=True)
+                }), width='stretch', hide_index=True)
 
                 pdf_file = generate_invoice_pdf(invoice_data, invoice_items_df)
                 st.download_button(
@@ -917,12 +965,18 @@ def show_monitoring_stok():
     if not master_df.empty:
         master_df['Stok Saat Ini'] = master_df.apply(lambda row: get_stock_balance(row['kode_bahan'], row['warna']), axis=1)
         df_display = master_df[['kode_bahan', 'nama_bahan', 'warna', 'Stok Saat Ini']].copy()
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        df_display.rename(columns={
+            'kode_bahan': 'Kode Bahan',
+            'nama_bahan': 'Nama Bahan',
+            'warna': 'Warna',
+            'Stok Saat Ini': 'Stok Saat Ini'
+        }, inplace=True)
+        st.dataframe(df_display, width='stretch', hide_index=True)
     else:
         st.warning("Belum ada master barang.")
 
     st.markdown("---")
-    st.header("Rekam Jejak Stok (In & Out)")
+    st.subheader("Rekam Jejak Stok (In & Out)")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -931,9 +985,17 @@ def show_monitoring_stok():
         end_date = st.date_input("Tanggal Selesai", value=datetime.now().date())
         
     if st.button("Tampilkan Rekam Jejak"):
-        records_df = get_in_out_records(start_date, end_date)
+        records_df = get_in_out_records(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
         if not records_df.empty:
-            st.dataframe(records_df, use_container_width=True, hide_index=True)
+            records_df.rename(columns={
+                'tanggal_waktu': 'Tanggal & Waktu',
+                'kode_bahan': 'Kode Bahan',
+                'warna': 'Warna',
+                'qty': 'Jumlah',
+                'type': 'Tipe',
+                'keterangan': 'Keterangan'
+            }, inplace=True)
+            st.dataframe(records_df, width='stretch', hide_index=True)
         else:
             st.info("Tidak ada catatan stok masuk atau keluar pada rentang tanggal tersebut.")
 
@@ -946,6 +1008,7 @@ def show_payroll_page():
     with tab_master:
         st.subheader("Data Master Karyawan")
         
+        # Form to add new employee
         with st.expander("➕ Tambah Karyawan Baru", expanded=False):
             with st.form("add_employee_form"):
                 col1, col2 = st.columns(2)
@@ -958,11 +1021,9 @@ def show_payroll_page():
                 submitted = st.form_submit_button("Tambah Karyawan")
                 if submitted:
                     if nama and bagian and gaji > 0:
-                        if add_employee(nama, bagian, gaji):
-                            st.success(f"Karyawan {nama} berhasil ditambahkan. ✅")
-                            st.rerun()
-                        else:
-                            st.error("Gagal menambahkan karyawan. Nama karyawan mungkin sudah ada.")
+                        add_employee(nama, bagian, gaji)
+                        st.success(f"Karyawan {nama} berhasil ditambahkan. ✅")
+                        st.rerun()
                     else:
                         st.error("Semua field wajib diisi. ❌")
 
@@ -970,40 +1031,35 @@ def show_payroll_page():
         st.subheader("Daftar Karyawan")
         employees_df_master = get_employees()
         if not employees_df_master.empty:
-            st.dataframe(employees_df_master, use_container_width=True, hide_index=True)
+            employees_df_master.rename(columns={'id':'ID', 'nama_karyawan':'Nama', 'bagian':'Bagian', 'gaji_pokok':'Gaji Pokok'}, inplace=True)
+            st.dataframe(employees_df_master, width='stretch', hide_index=True)
 
+            # Form to edit/delete employee
             st.markdown("---")
             with st.expander("Kelola Data Karyawan"):
-                selected_employee_name = st.selectbox("Pilih Nama Karyawan", employees_df_master['nama_karyawan'].tolist(), key='master_edit_select')
+                selected_employee_id = st.selectbox("Pilih ID Karyawan", employees_df_master['ID'].tolist(), key='master_edit_select')
                 
-                selected_row = employees_df_master[employees_df_master['nama_karyawan'] == selected_employee_name].iloc[0]
+                selected_row = employees_df_master[employees_df_master['ID'] == selected_employee_id].iloc[0]
                 
                 with st.form("edit_employee_form"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        edit_nama = st.text_input("Nama", value=selected_row['nama_karyawan'])
+                        edit_nama = st.text_input("Nama", value=selected_row['Nama'])
                     with col2:
-                        edit_bagian = st.text_input("Bagian", value=selected_row['bagian'])
-                    
-                    # Perbaikan: Menggunakan float() untuk memastikan nilai numerik
-                    gaji_pokok_value = float(selected_row['gaji_pokok']) if pd.notna(selected_row['gaji_pokok']) else 0.0
-                    edit_gaji = st.number_input("Gaji Pokok", value=gaji_pokok_value, min_value=0.0)
+                        edit_bagian = st.text_input("Bagian", value=selected_row['Bagian'])
+                    edit_gaji = st.number_input("Gaji Pokok", value=selected_row['Gaji Pokok'], min_value=0.0)
                     
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
                         if st.form_submit_button("Simpan Perubahan"):
-                            if update_employee(selected_employee_name, edit_nama, edit_bagian, edit_gaji):
-                                st.success("Data karyawan berhasil diperbarui! ✅")
-                                st.rerun()
-                            else:
-                                st.error("Gagal memperbarui data. Nama karyawan mungkin sudah ada.")
+                            update_employee(selected_employee_id, edit_nama, edit_bagian, edit_gaji)
+                            st.success("Data karyawan berhasil diperbarui! ✅")
+                            st.rerun()
                     with col_btn2:
                         if st.form_submit_button("Hapus Karyawan"):
-                            if delete_employee(selected_employee_name):
-                                st.success("Karyawan berhasil dihapus. 🗑️")
-                                st.rerun()
-                            else:
-                                st.error("Gagal menghapus karyawan.")
+                            delete_employee(selected_employee_id)
+                            st.success("Karyawan berhasil dihapus. 🗑️")
+                            st.rerun()
         else:
             st.info("Belum ada data karyawan.")
 
@@ -1013,9 +1069,8 @@ def show_payroll_page():
         if employees_df.empty:
             st.warning("Tambahkan data karyawan terlebih dahulu di tab 'Master Karyawan'. ⚠️")
         else:
-            # Gsheets doesn't have an ID column by default. We'll simulate it for this session.
-            employees_df['id'] = range(1, len(employees_df) + 1)
-            employee_options = employees_df.apply(lambda row: f"{int(row['id'])} - {row['nama_karyawan']} ({row['bagian']})", axis=1).tolist()
+            st.markdown("Pilih karyawan yang akan diproses gajinya.")
+            employee_options = employees_df.apply(lambda row: f"{row['id']} - {row['nama_karyawan']} ({row['bagian']})", axis=1).tolist()
             selected_employee_str = st.selectbox("Pilih Karyawan", employee_options)
             
             if selected_employee_str:
@@ -1027,6 +1082,7 @@ def show_payroll_page():
                     st.write(f"**Bagian:** {selected_employee_data['bagian']}")
 
                     selected_date = st.date_input("Pilih Tanggal Gaji", value=datetime.now().date())
+                    # Format the date to "Month Year" string for database storage
                     gaji_bulan = selected_date.strftime('%B %Y')
                     
                     st.markdown("### Pendapatan")
@@ -1058,20 +1114,18 @@ def show_payroll_page():
                     
                     submitted = st.form_submit_button("💾 Simpan Gaji")
                     if submitted:
-                        if add_payroll_record(employee_id, gaji_bulan, selected_employee_data['gaji_pokok'], lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan):
-                            st.success(f"Penggajian untuk {selected_employee_data['nama_karyawan']} berhasil dicatat. ✅")
-                            st.rerun()
-                        else:
-                            st.error("Gagal menyimpan data gaji.")
+                        add_payroll_record(employee_id, gaji_bulan, selected_employee_data['gaji_pokok'], lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan)
+                        st.success(f"Penggajian untuk {selected_employee_data['nama_karyawan']} berhasil dicatat. ✅")
+                        st.rerun()
 
     with tab_history:
         st.subheader("Riwayat Penggajian")
         
+        # Filter for PDF download
         st.markdown("### Unduh Semua Slip Gaji (PDF)")
-        payroll_df_all = get_data_from_gsheets('payroll')
-        if not payroll_df_all.empty:
-            payroll_months = payroll_df_all['gaji_bulan'].unique().tolist()
-            selected_month = st.selectbox("Pilih Bulan Gaji", payroll_months)
+        payroll_months = pd.read_sql_query("SELECT DISTINCT gaji_bulan FROM payroll ORDER BY gaji_bulan DESC", sqlite3.connect('stock_control.db'))
+        if not payroll_months.empty:
+            selected_month = st.selectbox("Pilih Bulan Gaji", payroll_months['gaji_bulan'].tolist())
             
             if st.button(f"Unduh Slip Gaji {selected_month}"):
                 payslip_data = get_payroll_records_by_month(selected_month)
@@ -1092,6 +1146,7 @@ def show_payroll_page():
         st.subheader("Tabel Riwayat Penggajian")
         payroll_df = get_payroll_records()
         if not payroll_df.empty:
+            # Mapping bulan dari Inggris ke Indonesia
             month_mapping = {
                 'January': 'Januari', 'February': 'Februari', 'March': 'Maret',
                 'April': 'April', 'May': 'Mei', 'June': 'Juni',
@@ -1099,13 +1154,22 @@ def show_payroll_page():
                 'October': 'Oktober', 'November': 'November', 'December': 'Desember'
             }
             
+            # Mengubah format tanggal_waktu
             payroll_df['tanggal_waktu'] = pd.to_datetime(payroll_df['tanggal_waktu'])
             payroll_df['tanggal_waktu'] = payroll_df['tanggal_waktu'].dt.strftime('%d %B %Y')
             
+            # Mengganti nama bulan dari bahasa Inggris ke Indonesia
             for en, idn in month_mapping.items():
                 payroll_df['tanggal_waktu'] = payroll_df['tanggal_waktu'].str.replace(en, idn)
             
-            st.dataframe(payroll_df, use_container_width=True, hide_index=True)
+            payroll_df.rename(columns={
+                'tanggal_waktu':'Tanggal',
+                'gaji_bulan': 'Periode Gaji',
+                'nama_karyawan':'Nama Karyawan', 
+                'gaji_akhir':'Gaji Bersih', 
+                'keterangan':'Keterangan'
+            }, inplace=True)
+            st.dataframe(payroll_df.drop('id', axis=1), width='stretch', hide_index=True)
         else:
             st.info("Belum ada riwayat penggajian.")
 
@@ -1135,31 +1199,27 @@ def main():
     st.sidebar.markdown("---")
 
     if st.session_state['logged_in']:
-        if 'sheets_checked' not in st.session_state:
-            check_and_create_worksheets()
-            st.session_state['sheets_checked'] = True
-
-        if st.sidebar.button("Dashboard 📈", use_container_width=True):
+        if st.sidebar.button("Dashboard 📈", width='stretch'):
             st.session_state['page'] = "Dashboard"
             st.rerun()
-        if st.sidebar.button("Master Barang 📦", use_container_width=True):
+        if st.sidebar.button("Master Barang 📦", width='stretch'):
             st.session_state['page'] = "Master Barang"
             st.rerun()
-        if st.sidebar.button("Barang Masuk 📥", use_container_width=True):
+        if st.sidebar.button("Barang Masuk 📥", width='stretch'):
             st.session_state['page'] = "Barang Masuk"
             st.rerun()
-        if st.sidebar.button("Transaksi Keluar 🧾", use_container_width=True):
+        if st.sidebar.button("Transaksi Keluar 🧾", width='stretch'):
             st.session_state['page'] = "Transaksi Keluar"
             st.rerun()
-        if st.sidebar.button("Monitoring Stok 📊", use_container_width=True):
+        if st.sidebar.button("Monitoring Stok 📊", width='stretch'):
             st.session_state['page'] = "Monitoring Stok"
             st.rerun()
-        if st.sidebar.button("Penggajian 💰", use_container_width=True):
+        if st.sidebar.button("Penggajian 💰", width='stretch'):
             st.session_state['page'] = "Penggajian"
             st.rerun()
         
         st.sidebar.markdown("---")
-        if st.sidebar.button("Logout 🚪", use_container_width=True):
+        if st.sidebar.button("Logout 🚪", width='stretch'):
             st.session_state['logged_in'] = False
             st.session_state['page'] = 'Login'
             st.rerun()
@@ -1180,4 +1240,5 @@ def main():
         login_page()
 
 if __name__ == "__main__":
+    init_db()
     main()

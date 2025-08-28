@@ -197,7 +197,7 @@ def get_barang_masuk():
     df = get_data_from_gsheets('barang_masuk')
     if not df.empty:
         # Perbaikan: Konversi kolom 'stok' dan 'yard' ke tipe numerik
-        df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0)
+        df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0).astype(int) # Pastikan integer
         df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
     return df
 
@@ -252,7 +252,7 @@ def get_barang_keluar():
     df = get_data_from_gsheets('barang_keluar')
     if not df.empty:
         # Perbaikan: Konversi kolom 'stok' dan 'yard' ke tipe numerik
-        df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0)
+        df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0).astype(int) # Pastikan integer
         df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
     return df
     
@@ -701,11 +701,11 @@ def show_input_masuk():
                         filtered_colors_edit = master_df[master_df['kode_bahan'] == edit_kode_bahan]['warna'].tolist()
                         edit_warna = st.selectbox("Warna", filtered_colors_edit, index=filtered_colors_edit.index(selected_row['warna']), key="edit_in_warna")
                         
-                        # Perbaikan: Menggunakan float() untuk memastikan nilai numerik
-                        stok_value = float(selected_row['stok']) if pd.notna(selected_row['stok']) else 0
+                        # PERBAIKAN: Menggunakan int() dan min_value=0
+                        stok_value = int(selected_row['stok']) if pd.notna(selected_row['stok']) else 0
                         yard_value = float(selected_row['yard']) if pd.notna(selected_row['yard']) else 0.0
 
-                        edit_stok = st.number_input("Stok", value=stok_value, min_value=1, key="edit_in_stok")
+                        edit_stok = st.number_input("Stok", value=stok_value, min_value=0, key="edit_in_stok")
                         edit_yard = st.number_input("Yard", value=yard_value, min_value=0.0, key="edit_in_yard")
                         edit_keterangan = st.text_area("Keterangan", value=selected_row['keterangan'], key="edit_in_ket")
 
@@ -799,6 +799,7 @@ def show_transaksi_keluar_invoice_page():
                     with col_qty:
                         min_val = 1 if stok_saat_ini > 0 else 0
                         max_val = int(stok_saat_ini)
+                        # PERBAIKAN: Menggunakan int() untuk memastikan nilai numerik integer
                         st.session_state.cart_items[i]['qty'] = st.number_input(
                             "Jumlah",
                             min_value=min_val,

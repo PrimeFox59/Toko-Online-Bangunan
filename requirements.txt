@@ -3,5 +3,4 @@ pandas
 bcrypt
 plotly
 fpdf2
-streamlit-gsheets
 gspread

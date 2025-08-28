@@ -8,7 +8,7 @@ import streamlit.components.v1 as components # Import for custom HTML/JS
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Timesheet METSO",
+    page_title="PT. BERKAT KARYA ANUGERAH",
     page_icon="📝",
     layout="wide"
 )
@@ -1069,3 +1069,4 @@ st.markdown(
     "<p align='center'>This application was developed by <b>Galih Primananda</b> and <b>Iqlima Nur Hayati</b>, 2025.</p>",
     unsafe_allow_html=True
 )
+

@@ -324,8 +324,8 @@ def generate_invoice_pdf(invoice_data, invoice_items):
     pdf.ln(10)
     pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
     
-    # PERBAIKAN: Gunakan utf-8 dengan 'ignore' untuk menghindari error encoding
-    return pdf.output(dest='S').encode('utf-8', 'ignore')
+    # PERBAIKAN: Hapus .encode(), output() sudah mengembalikan bytearray
+    return pdf.output(dest='S')
     
 def generate_invoice_number():
     df_invoices = get_invoices()
@@ -542,8 +542,8 @@ def generate_payslips_pdf(payslip_df):
         pdf.ln(15)
         pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
 
-    # PERBAIKAN: Gunakan utf-8 dengan 'ignore' untuk menghindari error encoding
-    return pdf.output(dest='S').encode('utf-8', 'ignore')
+    # PERBAIKAN: Hapus .encode(), output() sudah mengembalikan bytearray
+    return pdf.output(dest='S')
 
 def show_dashboard():
     st.title("Dashboard Bisnis 📈")

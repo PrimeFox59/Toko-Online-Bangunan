@@ -324,8 +324,10 @@ def generate_invoice_pdf(invoice_data, invoice_items):
     pdf.ln(10)
     pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
     
-    # PERBAIKAN: Hapus .encode(), output() sudah mengembalikan bytearray
-    return pdf.output(dest='S')
+    # PERBAIKAN: Menggunakan BytesIO untuk kompatibilitas download
+    pdf_output = pdf.output(dest='S')
+    pdf_buffer = io.BytesIO(pdf_output)
+    return pdf_buffer
     
 def generate_invoice_number():
     df_invoices = get_invoices()
@@ -542,8 +544,10 @@ def generate_payslips_pdf(payslip_df):
         pdf.ln(15)
         pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
 
-    # PERBAIKAN: Hapus .encode(), output() sudah mengembalikan bytearray
-    return pdf.output(dest='S')
+    # PERBAIKAN: Menggunakan BytesIO untuk kompatibilitas download
+    pdf_output = pdf.output(dest='S')
+    pdf_buffer = io.BytesIO(pdf_output)
+    return pdf_buffer
 
 def show_dashboard():
     st.title("Dashboard Bisnis 📈")
@@ -877,9 +881,10 @@ def show_transaksi_keluar_invoice_page():
                         }
                         try:
                             pdf_file = generate_invoice_pdf(invoice_details, invoice_items_df)
+                            # PERBAIKAN: Gunakan .getvalue() untuk mengambil data biner dari buffer
                             st.download_button(
                                 label="Klik untuk Download",
-                                data=pdf_file,
+                                data=pdf_file.getvalue(),
                                 file_name=f"Invoice_{invoice_data['invoice_number']}.pdf",
                                 mime="application/pdf"
                             )
@@ -1070,9 +1075,10 @@ def show_payroll_page():
             if st.button("Download Slip Gaji PDF"):
                 try:
                     pdf_file = generate_payslips_pdf(payroll_df)
+                    # PERBAIKAN: Gunakan .getvalue() untuk mengambil data biner dari buffer
                     st.download_button(
                         label="Klik untuk Download",
-                        data=pdf_file,
+                        data=pdf_file.getvalue(),
                         file_name=f"Slip_Gaji_{selected_month}.pdf",
                         mime="application/pdf"
                     )

@@ -99,6 +99,8 @@ def check_and_create_worksheets():
             new_ws.append_row(headers)
             st.success(f"Worksheet '{ws_name}' berhasil dibuat dengan header.")
 
+# PERBAIKAN: MENAMBAHKAN CACHING UNTUK MENGURANGI PANGGILAN API
+@st.cache_data(ttl=600)  # Cache data selama 10 menit
 def get_data_from_gsheets(sheet_name):
     worksheet = get_worksheet(sheet_name)
     if worksheet:
@@ -113,6 +115,7 @@ def append_row_to_gsheet(sheet_name, data_list):
     worksheet = get_worksheet(sheet_name)
     if worksheet:
         worksheet.append_row(data_list)
+        st.cache_data.clear() # PERBAIKAN: Hapus cache setelah menulis
         return True
     return False
 
@@ -120,6 +123,7 @@ def update_row_in_gsheet(sheet_name, row_index, data_list):
     worksheet = get_worksheet(sheet_name)
     if worksheet:
         worksheet.update(f"A{row_index+2}", [data_list])
+        st.cache_data.clear() # PERBAIKAN: Hapus cache setelah menulis
         return True
     return False
 
@@ -127,6 +131,7 @@ def delete_row_from_gsheet(sheet_name, row_index):
     worksheet = get_worksheet(sheet_name)
     if worksheet:
         worksheet.delete_rows(row_index+2)
+        st.cache_data.clear() # PERBAIKAN: Hapus cache setelah menulis
         return True
     return False
 
@@ -764,20 +769,26 @@ def show_transaksi_keluar_invoice_page():
     
     with tab_new_invoice:
         st.subheader("Formulir Transaksi Penjualan")
-        
+
+        # Use a separate container for adding items
         with st.container(border=True):
-            col_item_select, col_add_btn = st.columns([0.8, 0.2])
-            with col_item_select:
-                item_to_add_str = st.selectbox("Pilih Item yang Akan Dijual", item_options, key="item_add_select")
-            with col_add_btn:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("➕ Tambah Item"):
+            with st.form("add_item_form"):
+                col_item_select, col_add_btn = st.columns([0.8, 0.2])
+                with col_item_select:
+                    item_to_add_str = st.selectbox("Pilih Item yang Akan Dijual", item_options, key="item_add_select")
+                with col_add_btn:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    add_item_submitted = st.form_submit_button("➕ Tambah Item")
+                
+                if add_item_submitted:
                     selected_item_data = master_df[master_df['display_name'] == item_to_add_str].iloc[0]
+                    # Ensure harga is a float before adding to session state
+                    harga_cleaned = float(selected_item_data['harga']) if pd.notna(selected_item_data['harga']) else 0.0
                     new_item = {
                         "kode_bahan": selected_item_data['kode_bahan'],
                         "nama_bahan": selected_item_data['nama_bahan'],
                         "warna": selected_item_data['warna'],
-                        "harga": selected_item_data['harga'],
+                        "harga": harga_cleaned,
                         "qty": 0,
                         "yard": 0.0,
                         "keterangan": ""
@@ -785,6 +796,7 @@ def show_transaksi_keluar_invoice_page():
                     st.session_state['cart_items'].append(new_item)
                     st.rerun()
 
+        # The main transaction form
         with st.form("new_transaction_form"):
             customer_name = st.text_input("Nama Pelanggan", help="Wajib diisi", key="customer_name")
             
@@ -793,55 +805,51 @@ def show_transaksi_keluar_invoice_page():
 
             total_invoice = 0
             if 'cart_items' in st.session_state:
-                # Perbaikan: Pastikan qty dan harga di keranjang adalah numerik
                 for i, item in enumerate(st.session_state['cart_items']):
-                    st.session_state.cart_items[i]['harga'] = pd.to_numeric(st.session_state.cart_items[i]['harga'], errors='coerce').fillna(0)
-                    st.session_state.cart_items[i]['qty'] = pd.to_numeric(st.session_state.cart_items[i]['qty'], errors='coerce').fillna(0)
-            
-            for i, item in enumerate(st.session_state['cart_items']):
-                with st.container(border=True):
-                    col_item_display, col_delete_btn = st.columns([0.9, 0.1])
-                    
-                    with col_item_display:
-                        st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
-                    
-                    with col_delete_btn:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("🗑️", key=f"delete_btn_{i}"):
-                            st.session_state['cart_items'].pop(i)
-                            st.rerun()
-                    
-                    stok_saat_ini = get_stock_balance(item['kode_bahan'], item['warna'])
-                    
-                    col_qty, col_yard = st.columns(2)
-                    with col_qty:
-                        min_val = 1 if stok_saat_ini > 0 else 0
-                        max_val = int(stok_saat_ini)
-                        # PERBAIKAN: Menggunakan int() untuk memastikan nilai numerik integer
-                        st.session_state.cart_items[i]['qty'] = st.number_input(
-                            "Jumlah",
-                            min_value=min_val,
-                            max_value=max_val,
-                            value=int(st.session_state.cart_items[i].get('qty', 0)),
-                            key=f"qty_{i}"
-                        )
-                    
-                    with col_yard:
-                        st.session_state.cart_items[i]['yard'] = st.number_input(
-                            "Yard",
-                            min_value=0.0,
-                            value=float(st.session_state.cart_items[i].get('yard', 0)),
-                            key=f"yard_input_{i}"
-                        )
-                    
-                    st.session_state.cart_items[i]['keterangan'] = st.text_area(f"Keterangan (opsional)", value=st.session_state.cart_items[i].get('keterangan', ''), key=f"keterangan_{i}")
-                    
-                    current_item_total = st.session_state.cart_items[i]['qty'] * st.session_state.cart_items[i]['harga']
-                    st.session_state.cart_items[i]['total'] = current_item_total
-                    total_invoice += current_item_total
-                    
-                    st.markdown(f"**Harga Satuan:** Rp {st.session_state.cart_items[i]['harga']:,.2f}")
-                    st.markdown(f"**Total Harga Item:** Rp {current_item_total:,.2f}")
+                    with st.container(border=True):
+                        col_item_display, col_delete_btn = st.columns([0.9, 0.1])
+                        
+                        with col_item_display:
+                            st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
+                        
+                        with col_delete_btn:
+                            if st.button("🗑️", key=f"delete_btn_{i}"):
+                                st.session_state['cart_items'].pop(i)
+                                st.rerun()
+                        
+                        stok_saat_ini = get_stock_balance(item['kode_bahan'], item['warna'])
+                        
+                        col_qty, col_yard = st.columns(2)
+                        with col_qty:
+                            min_val = 1 if stok_saat_ini > 0 else 0
+                            max_val = int(stok_saat_ini)
+                            current_qty = int(st.session_state.cart_items[i].get('qty', 0))
+                            st.session_state.cart_items[i]['qty'] = st.number_input(
+                                "Jumlah",
+                                min_value=min_val,
+                                max_value=max_val,
+                                value=current_qty,
+                                key=f"qty_{i}"
+                            )
+                        
+                        with col_yard:
+                            current_yard = float(st.session_state.cart_items[i].get('yard', 0.0))
+                            st.session_state.cart_items[i]['yard'] = st.number_input(
+                                "Yard",
+                                min_value=0.0,
+                                value=current_yard,
+                                key=f"yard_input_{i}"
+                            )
+                        
+                        current_keterangan = str(st.session_state.cart_items[i].get('keterangan', ''))
+                        st.session_state.cart_items[i]['keterangan'] = st.text_area(f"Keterangan (opsional)", value=current_keterangan, key=f"keterangan_{i}")
+                        
+                        current_item_total = st.session_state.cart_items[i]['qty'] * st.session_state.cart_items[i]['harga']
+                        st.session_state.cart_items[i]['total'] = current_item_total
+                        total_invoice += current_item_total
+                        
+                        st.markdown(f"**Harga Satuan:** Rp {st.session_state.cart_items[i]['harga']:,.2f}")
+                        st.markdown(f"**Total Harga Item:** Rp {current_item_total:,.2f}")
                 
             st.markdown(f"### **Total Keseluruhan:** **Rp {total_invoice:,.2f}**")
             

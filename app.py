@@ -744,7 +744,8 @@ def show_input_masuk():
                             edit_warna = st.selectbox("Warna", edit_warna_options, index=edit_warna_options.index(selected_row['warna']), key="edit_in_warna")
                         edit_stok_str = st.text_input("Stok", value=str(selected_row['stok']), key="edit_in_stok")
                         edit_yard_str = st.text_input("Yard", value=str(selected_row['yard']), key="edit_in_yard")
-                        edit_keterangan = st.text_area("Keterangan", value=selected_row['keterangan'], key="edit_in_keterangan")
+                        # FIX: Check if 'keterangan' is a valid string before setting as value
+                        edit_keterangan = st.text_area("Keterangan", value=str(selected_row['keterangan']) if pd.notna(selected_row['keterangan']) else '', key="edit_in_keterangan")
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:
                             if st.form_submit_button("Simpan Perubahan"):

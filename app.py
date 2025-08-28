@@ -21,7 +21,7 @@ scope = [
 
 key_dict = st.secrets["gcp_service_account"]
 creds = Credentials.from_service_account_info(key_dict, scopes=scope)
-SHEET_ID = "PT. BERKAT KARYA ANUGERAH"
+SHEET_ID = "183qGysrbVVHwkNIxwtemTy0khx7eZw5jw0lreis_GLw"
 
 @st.cache_resource(ttl=3600) # Cache connection for 1 hour (3600 seconds)
 def get_google_sheet_client(sheet_id):
@@ -1069,5 +1069,6 @@ st.markdown(
     "<p align='center'>This application was developed by <b>Galih Primananda</b> and <b>Iqlima Nur Hayati</b>, 2025.</p>",
     unsafe_allow_html=True
 )
+
 
 

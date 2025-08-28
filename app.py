@@ -104,6 +104,7 @@ def get_data_from_gsheets(sheet_name):
     if worksheet:
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
+        # Drop rows that are all empty, which can happen with get_all_records
         df = df.replace('', pd.NA).dropna(how='all')
         return df
     return pd.DataFrame()
@@ -195,10 +196,12 @@ def add_barang_masuk(tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
 
 def get_barang_masuk():
     df = get_data_from_gsheets('barang_masuk')
-    if not df.empty:
-        # Perbaikan: Konversi kolom 'stok' dan 'yard' ke tipe numerik
-        df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0).astype(int) # Pastikan integer
-        df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
+    if df.empty:
+        # Perbaikan: Buat DataFrame kosong dengan kolom yang dibutuhkan
+        return pd.DataFrame(columns=['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'])
+
+    df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0).astype(int)
+    df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
     return df
 
 def update_barang_masuk(row_index, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
@@ -211,8 +214,16 @@ def get_stock_balance(kode_bahan, warna):
     df_in = get_barang_masuk()
     df_out = get_barang_keluar()
     
-    in_stock = df_in[(df_in['kode_bahan'] == kode_bahan) & (df_in['warna'] == warna)]['stok'].sum()
-    out_stock = df_out[(df_out['kode_bahan'] == kode_bahan) & (df_out['warna'] == warna)]['stok'].sum()
+    # Perbaikan: Periksa apakah DataFrame memiliki kolom sebelum melakukan filter
+    if not df_in.empty:
+        in_stock = df_in[(df_in['kode_bahan'] == kode_bahan) & (df_in['warna'] == warna)]['stok'].sum()
+    else:
+        in_stock = 0
+    
+    if not df_out.empty:
+        out_stock = df_out[(df_out['kode_bahan'] == kode_bahan) & (df_out['warna'] == warna)]['stok'].sum()
+    else:
+        out_stock = 0
 
     return in_stock - out_stock
 
@@ -223,13 +234,15 @@ def get_in_out_records(start_date, end_date):
     if df_in.empty and df_out.empty:
         return pd.DataFrame()
 
-    df_in['tanggal_waktu'] = pd.to_datetime(df_in['tanggal_waktu'])
-    df_in = df_in[(df_in['tanggal_waktu'].dt.date >= start_date) & (df_in['tanggal_waktu'].dt.date <= end_date)]
-    df_in = df_in.assign(qty=df_in['stok'], type='Masuk', keterangan=df_in['keterangan'])
+    if not df_in.empty:
+        df_in['tanggal_waktu'] = pd.to_datetime(df_in['tanggal_waktu'])
+        df_in = df_in[(df_in['tanggal_waktu'].dt.date >= start_date) & (df_in['tanggal_waktu'].dt.date <= end_date)]
+        df_in = df_in.assign(qty=df_in['stok'], type='Masuk', keterangan=df_in['keterangan'])
     
-    df_out['tanggal_waktu'] = pd.to_datetime(df_out['tanggal_waktu'])
-    df_out = df_out[(df_out['tanggal_waktu'].dt.date >= start_date) & (df_out['tanggal_waktu'].dt.date <= end_date)]
-    df_out = df_out.assign(qty=df_out['stok'], type='Keluar', keterangan=df_out['keterangan'])
+    if not df_out.empty:
+        df_out['tanggal_waktu'] = pd.to_datetime(df_out['tanggal_waktu'])
+        df_out = df_out[(df_out['tanggal_waktu'].dt.date >= start_date) & (df_out['tanggal_waktu'].dt.date <= end_date)]
+        df_out = df_out.assign(qty=df_out['stok'], type='Keluar', keterangan=df_out['keterangan'])
     
     df = pd.concat([df_in[['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan']], 
                     df_out[['tanggal_waktu', 'kode_bahan', 'warna', 'qty', 'type', 'keterangan']]], ignore_index=True)
@@ -250,10 +263,12 @@ def get_invoice_items(invoice_number):
 
 def get_barang_keluar():
     df = get_data_from_gsheets('barang_keluar')
-    if not df.empty:
-        # Perbaikan: Konversi kolom 'stok' dan 'yard' ke tipe numerik
-        df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0).astype(int) # Pastikan integer
-        df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
+    if df.empty:
+        # Perbaikan: Buat DataFrame kosong dengan kolom yang dibutuhkan
+        return pd.DataFrame(columns=['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'])
+
+    df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0).astype(int)
+    df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
     return df
     
 def generate_invoice_pdf(invoice_data, invoice_items):
@@ -707,7 +722,10 @@ def show_input_masuk():
 
                         edit_stok = st.number_input("Stok", value=stok_value, min_value=0, key="edit_in_stok")
                         edit_yard = st.number_input("Yard", value=yard_value, min_value=0.0, key="edit_in_yard")
-                        edit_keterangan = st.text_area("Keterangan", value=selected_row['keterangan'], key="edit_in_ket")
+                        
+                        # PERBAIKAN: Tangani nilai NaN dari kolom keterangan
+                        keterangan_value = str(selected_row['keterangan']) if pd.notna(selected_row['keterangan']) else ""
+                        edit_keterangan = st.text_area("Keterangan", value=keterangan_value, key="edit_in_ket")
 
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:

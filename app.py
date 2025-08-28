@@ -163,10 +163,13 @@ def add_master_item(kode, supplier, nama, warna, rak, harga):
     return append_row_to_gsheet('master_barang', [kode, supplier, nama, warna, rak, harga])
 
 def get_master_barang():
-    return get_data_from_gsheets('master_barang')
+    df = get_data_from_gsheets('master_barang')
+    if not df.empty:
+        df['harga'] = pd.to_numeric(df['harga'], errors='coerce').fillna(0)
+    return df
 
 def update_master_item(old_kode, old_warna, new_kode, new_warna, supplier, nama, rak, harga):
-    df_master = get_data_from_gsheets('master_barang')
+    df_master = get_master_barang() # Use the function that returns a clean df
     row_index = df_master.index[(df_master['kode_bahan'] == old_kode) & (df_master['warna'] == old_warna)].tolist()
     if not row_index:
         return False
@@ -191,25 +194,22 @@ def add_barang_masuk(tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
     return append_row_to_gsheet('barang_masuk', [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
 
 def get_barang_masuk():
-    return get_data_from_gsheets('barang_masuk')
+    df = get_data_from_gsheets('barang_masuk')
+    if not df.empty:
+        # Perbaikan: Konversi kolom 'stok' dan 'yard' ke tipe numerik
+        df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0)
+        df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
+    return df
 
-def update_barang_masuk(id, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
-    df_in = get_data_from_gsheets('barang_masuk')
-    row_index = df_in.index[df_in['id'] == id].tolist()
-    if not row_index:
-        return False
-    return update_row_in_gsheet('barang_masuk', row_index[0], [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
+def update_barang_masuk(row_index, tanggal_waktu, kode_bahan, warna, stok, yard, keterangan):
+    return update_row_in_gsheet('barang_masuk', row_index, [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
 
-def delete_barang_masuk(id):
-    df_in = get_data_from_gsheets('barang_masuk')
-    row_index = df_in.index[df_in['id'] == id].tolist()
-    if not row_index:
-        return False
-    return delete_row_from_gsheet('barang_masuk', row_index[0])
+def delete_barang_masuk(row_index):
+    return delete_row_from_gsheet('barang_masuk', row_index)
 
 def get_stock_balance(kode_bahan, warna):
-    df_in = get_data_from_gsheets('barang_masuk')
-    df_out = get_data_from_gsheets('barang_keluar')
+    df_in = get_barang_masuk()
+    df_out = get_barang_keluar()
     
     in_stock = df_in[(df_in['kode_bahan'] == kode_bahan) & (df_in['warna'] == warna)]['stok'].sum()
     out_stock = df_out[(df_out['kode_bahan'] == kode_bahan) & (df_out['warna'] == warna)]['stok'].sum()
@@ -217,8 +217,8 @@ def get_stock_balance(kode_bahan, warna):
     return in_stock - out_stock
 
 def get_in_out_records(start_date, end_date):
-    df_in = get_data_from_gsheets('barang_masuk')
-    df_out = get_data_from_gsheets('barang_keluar')
+    df_in = get_barang_masuk()
+    df_out = get_barang_keluar()
     
     if df_in.empty and df_out.empty:
         return pd.DataFrame()
@@ -243,10 +243,18 @@ def get_invoices():
 
 def get_invoice_items(invoice_number):
     df_items = get_data_from_gsheets('invoice_items')
+    if not df_items.empty:
+        df_items['harga'] = pd.to_numeric(df_items['harga'], errors='coerce').fillna(0)
+        df_items['total'] = pd.to_numeric(df_items['total'], errors='coerce').fillna(0)
     return df_items[df_items['invoice_number'] == invoice_number]
 
 def get_barang_keluar():
-    return get_data_from_gsheets('barang_keluar')
+    df = get_data_from_gsheets('barang_keluar')
+    if not df.empty:
+        # Perbaikan: Konversi kolom 'stok' dan 'yard' ke tipe numerik
+        df['stok'] = pd.to_numeric(df['stok'], errors='coerce').fillna(0)
+        df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
+    return df
     
 def generate_invoice_pdf(invoice_data, invoice_items):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
@@ -337,24 +345,27 @@ def add_barang_keluar_and_invoice(invoice_number, customer_name, items):
 
 # --- Payroll Functions ---
 def add_employee(nama, bagian, gaji):
-    df_employees = get_data_from_gsheets('employees')
+    df_employees = get_employees()
     # Check if employee already exists to avoid duplicates
     if not df_employees.empty and (df_employees['nama_karyawan'] == nama).any():
         return False
     return append_row_to_gsheet('employees', [nama, bagian, gaji])
 
 def get_employees():
-    return get_data_from_gsheets('employees')
+    df = get_data_from_gsheets('employees')
+    if not df.empty:
+        df['gaji_pokok'] = pd.to_numeric(df['gaji_pokok'], errors='coerce').fillna(0)
+    return df
 
 def update_employee(old_name, new_nama, new_bagian, new_gaji):
-    df_employees = get_data_from_gsheets('employees')
+    df_employees = get_employees()
     row_index = df_employees.index[df_employees['nama_karyawan'] == old_name].tolist()
     if not row_index:
         return False
     return update_row_in_gsheet('employees', row_index[0], [new_nama, new_bagian, new_gaji])
 
 def delete_employee(nama):
-    df_employees = get_data_from_gsheets('employees')
+    df_employees = get_employees()
     row_index = df_employees.index[df_employees['nama_karyawan'] == nama].tolist()
     if not row_index:
         return False
@@ -366,7 +377,7 @@ def add_payroll_record(employee_id, gaji_bulan, gaji_pokok, lembur, lembur_mingg
 
 def get_payroll_records():
     df_payroll = get_data_from_gsheets('payroll')
-    df_employees = get_data_from_gsheets('employees')
+    df_employees = get_employees()
 
     if df_payroll.empty or df_employees.empty:
         return pd.DataFrame()
@@ -379,7 +390,7 @@ def get_payroll_records():
 
 def get_payroll_records_by_month(month_str):
     df_payroll = get_data_from_gsheets('payroll')
-    df_employees = get_data_from_gsheets('employees')
+    df_employees = get_employees()
     
     if df_payroll.empty or df_employees.empty:
         return pd.DataFrame()
@@ -387,6 +398,10 @@ def get_payroll_records_by_month(month_str):
     df_employees['id'] = range(1, len(df_employees) + 1)
     
     df_payroll = df_payroll[df_payroll['gaji_bulan'] == month_str]
+    
+    # Perbaikan: Pastikan kolom numerik dikonversi sebelum diolah
+    for col in ['gaji_pokok', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir']:
+        df_payroll[col] = pd.to_numeric(df_payroll[col], errors='coerce').fillna(0)
     
     df_payroll = df_payroll.merge(df_employees, left_on='employee_id', right_on='id', how='left')
     
@@ -575,8 +590,6 @@ def show_master_barang():
         st.subheader("Daftar Barang")
         df = get_master_barang()
         if not df.empty:
-            # Perbaikan: Konversi kolom 'harga' ke tipe numerik
-            df['harga'] = pd.to_numeric(df['harga'], errors='coerce').fillna(0)
             df_display = df.copy()
             st.dataframe(df_display, use_container_width=True, hide_index=True)
             
@@ -593,7 +606,6 @@ def show_master_barang():
                     if not filtered_df.empty:
                         selected_row = filtered_df.iloc[0]
                         
-                        # Pastikan nilai harga yang digunakan adalah float
                         harga_value = float(selected_row['harga']) if pd.notna(selected_row['harga']) else 0.0
 
                         with st.form("edit_master_form"):
@@ -689,21 +701,25 @@ def show_input_masuk():
                         filtered_colors_edit = master_df[master_df['kode_bahan'] == edit_kode_bahan]['warna'].tolist()
                         edit_warna = st.selectbox("Warna", filtered_colors_edit, index=filtered_colors_edit.index(selected_row['warna']), key="edit_in_warna")
                         
-                        edit_stok = st.number_input("Stok", value=selected_row['stok'], min_value=1, key="edit_in_stok")
-                        edit_yard = st.number_input("Yard", value=selected_row['yard'], min_value=0.0, key="edit_in_yard")
+                        # Perbaikan: Menggunakan float() untuk memastikan nilai numerik
+                        stok_value = float(selected_row['stok']) if pd.notna(selected_row['stok']) else 0
+                        yard_value = float(selected_row['yard']) if pd.notna(selected_row['yard']) else 0.0
+
+                        edit_stok = st.number_input("Stok", value=stok_value, min_value=1, key="edit_in_stok")
+                        edit_yard = st.number_input("Yard", value=yard_value, min_value=0.0, key="edit_in_yard")
                         edit_keterangan = st.text_area("Keterangan", value=selected_row['keterangan'], key="edit_in_ket")
 
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:
                             if st.form_submit_button("Simpan Perubahan"):
-                                if update_row_in_gsheet('barang_masuk', row_index, [edit_tanggal_waktu, edit_kode_bahan, edit_warna, edit_stok, edit_yard, edit_keterangan]):
+                                if update_barang_masuk(row_index, edit_tanggal_waktu, edit_kode_bahan, edit_warna, edit_stok, edit_yard, edit_keterangan):
                                     st.success("Data berhasil diperbarui! ✅")
                                     st.rerun()
                                 else:
                                     st.error("Gagal memperbarui data.")
                         with col_btn2:
                             if st.form_submit_button("Hapus Data"):
-                                if delete_row_from_gsheet('barang_masuk', row_index):
+                                if delete_barang_masuk(row_index):
                                     st.success("Data berhasil dihapus! 🗑️")
                                     st.rerun()
                                 else:
@@ -745,7 +761,7 @@ def show_transaksi_keluar_invoice_page():
                         "warna": selected_item_data['warna'],
                         "harga": selected_item_data['harga'],
                         "qty": 0,
-                        "yard": 0,
+                        "yard": 0.0,
                         "keterangan": ""
                     }
                     st.session_state['cart_items'].append(new_item)
@@ -758,6 +774,12 @@ def show_transaksi_keluar_invoice_page():
             st.subheader("Keranjang Belanja 🛒")
 
             total_invoice = 0
+            if 'cart_items' in st.session_state:
+                # Perbaikan: Pastikan qty dan harga di keranjang adalah numerik
+                for i, item in enumerate(st.session_state['cart_items']):
+                    st.session_state.cart_items[i]['harga'] = pd.to_numeric(st.session_state.cart_items[i]['harga'], errors='coerce').fillna(0)
+                    st.session_state.cart_items[i]['qty'] = pd.to_numeric(st.session_state.cart_items[i]['qty'], errors='coerce').fillna(0)
+            
             for i, item in enumerate(st.session_state['cart_items']):
                 with st.container(border=True):
                     col_item_display, col_delete_btn = st.columns([0.9, 0.1])
@@ -789,6 +811,7 @@ def show_transaksi_keluar_invoice_page():
                         st.session_state.cart_items[i]['yard'] = st.number_input(
                             "Yard",
                             min_value=0.0,
+                            value=float(st.session_state.cart_items[i].get('yard', 0)),
                             key=f"yard_input_{i}"
                         )
                     
@@ -869,7 +892,7 @@ def show_monitoring_stok():
         st.warning("Belum ada master barang.")
 
     st.markdown("---")
-    st.subheader("Rekam Jejak Stok (In & Out)")
+    st.header("Rekam Jejak Stok (In & Out)")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -931,7 +954,10 @@ def show_payroll_page():
                         edit_nama = st.text_input("Nama", value=selected_row['nama_karyawan'])
                     with col2:
                         edit_bagian = st.text_input("Bagian", value=selected_row['bagian'])
-                    edit_gaji = st.number_input("Gaji Pokok", value=selected_row['gaji_pokok'], min_value=0.0)
+                    
+                    # Perbaikan: Menggunakan float() untuk memastikan nilai numerik
+                    gaji_pokok_value = float(selected_row['gaji_pokok']) if pd.notna(selected_row['gaji_pokok']) else 0.0
+                    edit_gaji = st.number_input("Gaji Pokok", value=gaji_pokok_value, min_value=0.0)
                     
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:

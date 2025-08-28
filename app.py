@@ -509,6 +509,9 @@ def show_dashboard():
     
     col_total_value, col_total_items = st.columns(2)
     if not master_df.empty:
+        # Perbaikan: Konversi harga ke numerik
+        master_df['harga'] = pd.to_numeric(master_df['harga'], errors='coerce').fillna(0)
+        
         master_df['Stok Saat Ini'] = master_df.apply(lambda row: get_stock_balance(row['kode_bahan'], row['warna']), axis=1)
         total_value = (master_df['Stok Saat Ini'] * master_df['harga']).sum()
         total_items = master_df['Stok Saat Ini'].sum()
@@ -572,6 +575,8 @@ def show_master_barang():
         st.subheader("Daftar Barang")
         df = get_master_barang()
         if not df.empty:
+            # Perbaikan: Konversi kolom 'harga' ke tipe numerik
+            df['harga'] = pd.to_numeric(df['harga'], errors='coerce').fillna(0)
             df_display = df.copy()
             st.dataframe(df_display, use_container_width=True, hide_index=True)
             
@@ -588,6 +593,9 @@ def show_master_barang():
                     if not filtered_df.empty:
                         selected_row = filtered_df.iloc[0]
                         
+                        # Pastikan nilai harga yang digunakan adalah float
+                        harga_value = float(selected_row['harga']) if pd.notna(selected_row['harga']) else 0.0
+
                         with st.form("edit_master_form"):
                             col1, col2 = st.columns(2)
                             with col1:
@@ -597,7 +605,7 @@ def show_master_barang():
                             with col2:
                                 new_warna = st.text_input("Warna Baru", value=selected_row['warna']).lower()
                                 new_nama_supplier = st.text_input("Nama Supplier", value=selected_row['nama_supplier'])
-                                new_harga = st.number_input("Harga", value=selected_row['harga'], min_value=0.0)
+                                new_harga = st.number_input("Harga", value=harga_value, min_value=0.0)
                                 
                             col_btn1, col_btn2 = st.columns(2)
                             with col_btn1:

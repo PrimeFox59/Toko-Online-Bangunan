@@ -782,7 +782,6 @@ def show_transaksi_keluar_invoice_page():
                 
                 if add_item_submitted:
                     selected_item_data = master_df[master_df['display_name'] == item_to_add_str].iloc[0]
-                    # Ensure harga is a float before adding to session state
                     harga_cleaned = float(selected_item_data['harga']) if pd.notna(selected_item_data['harga']) else 0.0
                     new_item = {
                         "kode_bahan": selected_item_data['kode_bahan'],
@@ -796,27 +795,31 @@ def show_transaksi_keluar_invoice_page():
                     st.session_state['cart_items'].append(new_item)
                     st.rerun()
 
+        st.subheader("Keranjang Belanja 🛒")
+        
+        # PERBAIKAN: Move delete button logic outside the form
+        if 'cart_items' in st.session_state:
+            for i, item in enumerate(st.session_state['cart_items']):
+                with st.container(border=True):
+                    col_item_display, col_delete_btn = st.columns([0.9, 0.1])
+                    
+                    with col_item_display:
+                        st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
+                    
+                    with col_delete_btn:
+                        if st.button("🗑️", key=f"delete_btn_{i}"):
+                            st.session_state['cart_items'].pop(i)
+                            st.rerun()
+
         # The main transaction form
         with st.form("new_transaction_form"):
             customer_name = st.text_input("Nama Pelanggan", help="Wajib diisi", key="customer_name")
             
-            st.markdown("---")
-            st.subheader("Keranjang Belanja 🛒")
-
             total_invoice = 0
             if 'cart_items' in st.session_state:
                 for i, item in enumerate(st.session_state['cart_items']):
                     with st.container(border=True):
-                        col_item_display, col_delete_btn = st.columns([0.9, 0.1])
-                        
-                        with col_item_display:
-                            st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
-                        
-                        with col_delete_btn:
-                            if st.button("🗑️", key=f"delete_btn_{i}"):
-                                st.session_state['cart_items'].pop(i)
-                                st.rerun()
-                        
+                        st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
                         stok_saat_ini = get_stock_balance(item['kode_bahan'], item['warna'])
                         
                         col_qty, col_yard = st.columns(2)

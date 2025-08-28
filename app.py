@@ -418,24 +418,32 @@ def get_payroll_records():
     
     return df_payroll[['tanggal_waktu', 'gaji_bulan', 'nama_karyawan', 'gaji_akhir', 'keterangan']]
 
+# PERBAIKAN: Mengubah urutan operasi untuk menghindari KeyError
 def get_payroll_records_by_month(month_str):
     df_payroll = get_data_from_gsheets('payroll')
     df_employees = get_employees()
     
     if df_payroll.empty or df_employees.empty:
         return pd.DataFrame()
-        
-    df_employees['id'] = range(1, len(df_employees) + 1)
     
+    # PERBAIKAN: Pastikan kolom ID numerik sebelum merge
+    df_employees['id'] = range(1, len(df_employees) + 1)
+    df_payroll['employee_id'] = pd.to_numeric(df_payroll['employee_id'], errors='coerce').fillna(0).astype(int)
+    
+    # Filter data penggajian berdasarkan bulan
     df_payroll = df_payroll[df_payroll['gaji_bulan'] == month_str]
     
-    # Perbaikan: Pastikan kolom numerik dikonversi sebelum diolah
-    for col in ['gaji_pokok', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir']:
-        df_payroll[col] = pd.to_numeric(df_payroll[col], errors='coerce').fillna(0)
-    
+    # Lakukan merge untuk menggabungkan data karyawan
     df_payroll = df_payroll.merge(df_employees, left_on='employee_id', right_on='id', how='left')
+
+    # PERBAIKAN: Konversi kolom numerik setelah merge
+    for col in ['gaji_pokok', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir']:
+        # Periksa apakah kolom ada di DataFrame yang telah digabungkan
+        if col in df_payroll.columns:
+            df_payroll[col] = pd.to_numeric(df_payroll[col], errors='coerce').fillna(0)
     
     return df_payroll
+
 
 def generate_payslips_pdf(payslip_df):
     pdf = FPDF(orientation='P', unit='mm', format='A4')

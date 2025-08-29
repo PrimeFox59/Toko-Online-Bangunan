@@ -941,6 +941,7 @@ def show_payroll_page():
     st.title("Penggajian Karyawan 💰")
     st.markdown("---")
 
+    # Ini adalah baris yang membuat tab
     tab_input_gaji, tab_master_karyawan, tab_riwayat_gaji = st.tabs(["📝 Input Gaji", "👥 Master Karyawan", "📜 Riwayat Gaji"])
 
     with tab_input_gaji:
@@ -993,7 +994,7 @@ def show_payroll_page():
                         
                         gaji_akhir = gaji_pokok + lembur + lembur_minggu + uang_makan - pot_absen_finger - ijin_hr - simpanan_wajib - potongan_koperasi - kasbon
                         
-                        if add_payroll_record(employee_id, gaji_bulan, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan):
+                        if add_payroll_record(employee_id, gaji_bulan, gaji_pokir, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan):
                             st.success(f"Gaji untuk **{nama_karyawan}** bulan **{gaji_bulan}** berhasil dicatat. ✅")
                             st.rerun()
                         else:

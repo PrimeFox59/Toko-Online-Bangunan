@@ -320,7 +320,8 @@ def generate_invoice_pdf(invoice_data, invoice_items):
     pdf.ln(10)
     pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
     
-    return pdf.output(dest='S').encode('latin1')
+    # PERBAIKAN: Hapus .encode('latin1') karena .output(dest='S') sudah mengembalikan bytes
+    return pdf.output(dest='S')
     
 def generate_invoice_number():
     df_invoices = get_invoices()
@@ -561,7 +562,8 @@ def generate_payslips_pdf(payslip_df):
         pdf.ln(15)
         pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
 
-    return pdf.output(dest='S').encode('latin1')
+    # PERBAIKAN: Hapus .encode('latin1') karena .output(dest='S') sudah mengembalikan bytes
+    return pdf.output(dest='S')
 
 def show_dashboard():
     st.title("Dashboard Bisnis 📈")
@@ -589,7 +591,7 @@ def show_dashboard():
     st.header("Stok 10 Item Terendah")
     if not master_df.empty:
         low_stock_df = master_df.sort_values(by='Stok Saat Ini', ascending=True).head(10)
-        low_stock_df['label'] = low_stock_df['nama_bahan'] + ' (' + low_stock_df['warna'] + ')'
+        low_stock_df['label'] = low_stock_df['nama_bahan'].astype(str) + ' (' + low_stock_df['warna'].astype(str) + ')'
         
         if not low_stock_df.empty:
             fig = px.bar(low_stock_df, 
@@ -810,7 +812,8 @@ def show_transaksi_keluar_invoice_page():
         st.warning("Belum ada master barang. Silakan tambahkan di menu Master Barang. ⚠️")
         return
 
-    master_df['display_name'] = master_df['kode_bahan'] + ' - ' + master_df['nama_bahan'] + ' (' + master_df['warna'] + ')'
+    # PERBAIKAN: Pastikan kolom adalah string sebelum digabungkan
+    master_df['display_name'] = master_df['kode_bahan'].astype(str) + ' - ' + master_df['nama_bahan'].astype(str) + ' (' + master_df['warna'].astype(str) + ')'
     item_options = master_df['display_name'].tolist()
 
     if 'cart_items' not in st.session_state:

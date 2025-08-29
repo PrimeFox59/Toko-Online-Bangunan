@@ -276,6 +276,7 @@ def get_barang_keluar():
     df['yard'] = pd.to_numeric(df['yard'], errors='coerce').fillna(0.0)
     return df
     
+# PERBAIKAN: Menggunakan io.BytesIO untuk mengelola file PDF di memori
 def generate_invoice_pdf(invoice_data, invoice_items):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
@@ -319,9 +320,10 @@ def generate_invoice_pdf(invoice_data, invoice_items):
     pdf.cell(0, 5, "Terimakasih atas pembelian anda", 0, 1, 'C')
     pdf.ln(10)
     pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
-    
-    # PERBAIKAN: Hapus .encode('latin1') karena .output(dest='S') sudah mengembalikan bytes
-    return pdf.output(dest='S')
+
+    pdf_output_bytes = pdf.output(dest='S')
+    pdf_file_buffer = io.BytesIO(pdf_output_bytes)
+    return pdf_file_buffer
     
 def generate_invoice_number():
     df_invoices = get_invoices()
@@ -455,6 +457,7 @@ def get_payroll_records_by_month(month_str):
     
     return merged_df
 
+# PERBAIKAN: Menggunakan io.BytesIO untuk mengelola file PDF di memori
 def generate_payslips_pdf(payslip_df):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     
@@ -562,8 +565,9 @@ def generate_payslips_pdf(payslip_df):
         pdf.ln(15)
         pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
 
-    # PERBAIKAN: Hapus .encode('latin1') karena .output(dest='S') sudah mengembalikan bytes
-    return pdf.output(dest='S')
+    pdf_output_bytes = pdf.output(dest='S')
+    pdf_file_buffer = io.BytesIO(pdf_output_bytes)
+    return pdf_file_buffer
 
 def show_dashboard():
     st.title("Dashboard Bisnis 📈")
@@ -961,10 +965,10 @@ def show_transaksi_keluar_invoice_page():
                     'total': 'Total'
                 }), use_container_width=True, hide_index=True)
 
-                pdf_file = generate_invoice_pdf(invoice_data, invoice_items_df)
+                pdf_file_buffer = generate_invoice_pdf(invoice_data, invoice_items_df)
                 st.download_button(
                     label="Unduh Invoice PDF 📥",
-                    data=pdf_file,
+                    data=pdf_file_buffer,
                     file_name=f"invoice_{selected_invoice}.pdf",
                     mime="application/pdf"
                 )
@@ -1176,10 +1180,10 @@ def show_payroll_page():
             if st.button(f"Unduh Slip Gaji {selected_month}"):
                 payslip_data = get_payroll_records_by_month(selected_month)
                 if not payslip_data.empty:
-                    pdf_file = generate_payslips_pdf(payslip_data)
+                    pdf_file_buffer = generate_payslips_pdf(payslip_data)
                     st.download_button(
                         label="Unduh PDF 📥",
-                        data=pdf_file,
+                        data=pdf_file_buffer,
                         file_name=f"slip_gaji_{selected_month.replace(' ', '_')}.pdf",
                         mime="application/pdf"
                     )

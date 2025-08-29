@@ -7,6 +7,7 @@ import bcrypt
 import plotly.express as px
 import gspread
 from gspread.exceptions import WorksheetNotFound
+import zipfile
 
 # --- CUSTOM CSS FOR UI/UX IMPROVEMENTS ---
 st.markdown("""
@@ -569,10 +570,47 @@ def generate_payslips_pdf(payslip_df):
     pdf_file_buffer = io.BytesIO(pdf_output_bytes)
     return pdf_file_buffer
 
+# --- Fungsi untuk Backup Data ---
+def create_backup_zip():
+    """Creates a ZIP file containing all Google Sheets data as CSVs."""
+    all_worksheets = sh.worksheets()
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for ws in all_worksheets:
+            try:
+                # Dapatkan semua data (termasuk header)
+                data = ws.get_all_values()
+                df = pd.DataFrame(data[1:], columns=data[0])
+                
+                # Ubah DataFrame menjadi string CSV
+                csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+                
+                # Tambahkan file CSV ke dalam ZIP
+                zip_file.writestr(f"{ws.title}.csv", csv_data)
+            except Exception as e:
+                st.warning(f"Gagal mem-backup worksheet '{ws.title}': {e}")
+                
+    zip_buffer.seek(0)
+    return zip_buffer
+
 def show_dashboard():
     st.title("Dashboard Bisnis 📈")
     st.markdown("---")
 
+    # PERBAIKAN: Tambahkan tombol download backup
+    st.subheader("Opsi Backup Data")
+    st.info("Klik tombol di bawah untuk mengunduh salinan (backup) dari seluruh data Anda dalam format ZIP. Setiap tabel akan disimpan sebagai file CSV terpisah.")
+    if st.download_button(
+        label="📥 Unduh Backup Data",
+        data=create_backup_zip(),
+        file_name=f"backup_data_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zip",
+        mime="application/zip",
+        use_container_width=True
+    ):
+        st.success("Backup berhasil diunduh! ✅")
+
+    st.markdown("---")
     master_df = get_master_barang()
     
     col_total_value, col_total_items = st.columns(2)
@@ -1287,7 +1325,7 @@ def show_user_guide():
         
     with st.expander("Q: Kenapa data yang baru saya input tidak muncul di tabel?", expanded=False):
         st.markdown("""
-        **A:** Aplikasi memiliki cache untuk mempercepat pemuatan data. Jika data baru tidak langsung muncul, silakan refresh halaman (tekan `F5` atau tombol refresh di browser) untuk memuat data terbaru.
+        **A:** Aplikasi memiliki cache untuk mempercepat pemuatan data. Jika data baru tidak langsung muncul, silakan refresh halaman (tekan `R` atau tombol refresh di browser) untuk memuat data terbaru.
         """)
 
     with st.expander("Q: Saya tidak bisa menambahkan item baru karena 'Kombinasi Kode Bahan dan Warna sudah ada.'", expanded=False):
@@ -1379,7 +1417,7 @@ def main():
         st.markdown("---")
         st.markdown("""
             <div style="text-align: center; color: #888; font-size: 0.8rem; margin-top: 2rem;">
-                Aplikasi ini dibuat oleh **Galih Primananda** | Kontak: 
+                Aplikasi ini dibuat oleh Galih Primananda | Kontak: 
                 <a href="mailto:primetroyxs@gmail.com" target="_blank">Email</a> | 
                 <a href="https://www.linkedin.com/in/galihprime" target="_blank">LinkedIn</a> | 
                 <a href="https://www.instagram.com/glh_prima" target="_blank">Instagram</a>

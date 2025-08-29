@@ -598,18 +598,6 @@ def show_dashboard():
     st.title("Dashboard Bisnis 📈")
     st.markdown("---")
 
-    # PERBAIKAN: Tambahkan tombol download backup
-    st.subheader("Opsi Backup Data")
-    st.info("Klik tombol di bawah untuk mengunduh salinan (backup) dari seluruh data Anda dalam format ZIP. Setiap tabel akan disimpan sebagai file CSV terpisah.")
-    if st.download_button(
-        label="📥 Unduh Backup Data",
-        data=create_backup_zip(),
-        file_name=f"backup_data_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zip",
-        mime="application/zip",
-        use_container_width=True
-    ):
-        st.success("Backup berhasil diunduh! ✅")
-
     st.markdown("---")
     master_df = get_master_barang()
     
@@ -1042,6 +1030,18 @@ def show_monitoring_stok():
         else:
             st.info("Tidak ada catatan stok masuk atau keluar pada rentang tanggal tersebut.")
 
+        # PERBAIKAN: Tambahkan tombol download backup
+    st.subheader("Opsi Backup Data")
+    st.info("Klik tombol di bawah untuk mengunduh salinan (backup) dari seluruh data Anda dalam format ZIP. Setiap tabel akan disimpan sebagai file CSV terpisah.")
+    if st.download_button(
+        label="📥 Unduh Backup Data",
+        data=create_backup_zip(),
+        file_name=f"backup_data_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zip",
+        mime="application/zip",
+        use_container_width=True
+    ):
+        st.success("Backup berhasil diunduh! ✅")    
+
 def show_payroll_page():
     st.title("Sistem Penggajian Karyawan 💰")
     st.markdown("---")
@@ -1428,3 +1428,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

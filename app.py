@@ -596,7 +596,13 @@ def show_master_barang():
                 with col2:
                     nama_bahan = st.text_input("Nama Bahan")
                     rak = st.text_input("Rak")
-                    harga = st.number_input("Harga", min_value=0.0)
+                    # PERBAIKAN: Menggunakan st.text_input dan mengonversi ke float
+                    harga_str = st.text_input("Harga", value="0.0")
+                    try:
+                        harga = float(harga_str)
+                    except ValueError:
+                        st.error("Harga harus berupa angka. Menggunakan nilai default 0.")
+                        harga = 0.0
                 
                 submitted = st.form_submit_button("💾 Simpan Barang")
                 if submitted:
@@ -637,16 +643,21 @@ def show_master_barang():
                             with col2:
                                 new_warna = st.text_input("Warna Baru", value=selected_row['warna']).lower()
                                 new_nama_supplier = st.text_input("Nama Supplier", value=selected_row['nama_supplier'])
-                                new_harga = st.number_input("Harga", value=harga_value, min_value=0.0)
+                                # PERBAIKAN: Menggunakan st.text_input dan mengonversi ke float
+                                new_harga_str = st.text_input("Harga", value=str(harga_value))
                                 
                             col_btn1, col_btn2 = st.columns(2)
                             with col_btn1:
                                 if st.form_submit_button("Simpan Perubahan"):
-                                    if update_master_item(selected_row['kode_bahan'], selected_row['warna'], new_kode_bahan, new_warna, new_nama_supplier, new_nama_bahan, new_rak, new_harga):
-                                        st.success("Data berhasil diperbarui! ✅")
-                                        st.rerun()
-                                    else:
-                                        st.error("Kombinasi Kode Bahan dan Warna baru sudah ada. Gagal menyimpan perubahan. ❌")
+                                    try:
+                                        new_harga = float(new_harga_str)
+                                        if update_master_item(selected_row['kode_bahan'], selected_row['warna'], new_kode_bahan, new_warna, new_nama_supplier, new_nama_bahan, new_rak, new_harga):
+                                            st.success("Data berhasil diperbarui! ✅")
+                                            st.rerun()
+                                        else:
+                                            st.error("Kombinasi Kode Bahan dan Warna baru sudah ada. Gagal menyimpan perubahan. ❌")
+                                    except ValueError:
+                                        st.error("Harga harus berupa angka. Gagal menyimpan perubahan.")
                             with col_btn2:
                                 if st.form_submit_button("Hapus Barang"):
                                     if delete_master_item(selected_row['kode_bahan'], selected_row['warna']):
@@ -682,18 +693,24 @@ def show_input_masuk():
                     filtered_colors = master_df[master_df['kode_bahan'] == selected_kode_bahan]['warna'].tolist()
                     selected_warna = st.selectbox("Warna", filtered_colors, key="in_warna")
                 
-                stok = st.number_input("Stok", min_value=1, key="in_stok")
-                yard = st.number_input("Yard", min_value=0.0, key="in_yard")
+                # PERBAIKAN: Menggunakan st.text_input dan mengonversi ke int
+                stok_str = st.text_input("Stok", value="0", help="Masukkan angka")
+                yard_str = st.text_input("Yard", value="0.0", help="Masukkan angka (desimal)")
                 keterangan = st.text_area("Keterangan", key="in_keterangan")
                 
                 submitted = st.form_submit_button("💾 Simpan Barang Masuk")
                 if submitted:
-                    tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    if add_barang_masuk(tanggal_waktu, selected_kode_bahan, selected_warna, stok, yard, keterangan):
-                        st.success("Barang masuk berhasil dicatat. ✅")
-                        st.rerun()
-                    else:
-                        st.error("Gagal menyimpan data barang masuk.")
+                    try:
+                        stok = int(stok_str)
+                        yard = float(yard_str)
+                        tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        if add_barang_masuk(tanggal_waktu, selected_kode_bahan, selected_warna, stok, yard, keterangan):
+                            st.success("Barang masuk berhasil dicatat. ✅")
+                            st.rerun()
+                        else:
+                            st.error("Gagal menyimpan data barang masuk.")
+                    except ValueError:
+                        st.error("Stok dan Yard harus berupa angka. ❌")
     
     with tab_list:
         st.subheader("Daftar Barang Masuk")
@@ -721,12 +738,12 @@ def show_input_masuk():
                         filtered_colors_edit = master_df[master_df['kode_bahan'] == edit_kode_bahan]['warna'].tolist()
                         edit_warna = st.selectbox("Warna", filtered_colors_edit, index=filtered_colors_edit.index(selected_row['warna']), key="edit_in_warna")
                         
-                        # PERBAIKAN: Menggunakan int() dan min_value=0
+                        # PERBAIKAN: Menggunakan st.text_input dan mengonversi
                         stok_value = int(selected_row['stok']) if pd.notna(selected_row['stok']) else 0
                         yard_value = float(selected_row['yard']) if pd.notna(selected_row['yard']) else 0.0
 
-                        edit_stok = st.number_input("Stok", value=stok_value, min_value=0, key="edit_in_stok")
-                        edit_yard = st.number_input("Yard", value=yard_value, min_value=0.0, key="edit_in_yard")
+                        edit_stok_str = st.text_input("Stok", value=str(stok_value), key="edit_in_stok")
+                        edit_yard_str = st.text_input("Yard", value=str(yard_value), key="edit_in_yard")
                         
                         # PERBAIKAN: Tangani nilai NaN dari kolom keterangan
                         keterangan_value = str(selected_row['keterangan']) if pd.notna(selected_row['keterangan']) else ""
@@ -735,11 +752,16 @@ def show_input_masuk():
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:
                             if st.form_submit_button("Simpan Perubahan"):
-                                if update_barang_masuk(row_index, edit_tanggal_waktu, edit_kode_bahan, edit_warna, edit_stok, edit_yard, edit_keterangan):
-                                    st.success("Data berhasil diperbarui! ✅")
-                                    st.rerun()
-                                else:
-                                    st.error("Gagal memperbarui data.")
+                                try:
+                                    edit_stok = int(edit_stok_str)
+                                    edit_yard = float(edit_yard_str)
+                                    if update_barang_masuk(row_index, edit_tanggal_waktu, edit_kode_bahan, edit_warna, edit_stok, edit_yard, edit_keterangan):
+                                        st.success("Data berhasil diperbarui! ✅")
+                                        st.rerun()
+                                    else:
+                                        st.error("Gagal memperbarui data.")
+                                except ValueError:
+                                    st.error("Stok dan Yard harus berupa angka. Gagal menyimpan perubahan.")
                         with col_btn2:
                             if st.form_submit_button("Hapus Data"):
                                 if delete_barang_masuk(row_index):
@@ -824,25 +846,36 @@ def show_transaksi_keluar_invoice_page():
                         
                         col_qty, col_yard = st.columns(2)
                         with col_qty:
-                            min_val = 1 if stok_saat_ini > 0 else 0
-                            max_val = int(stok_saat_ini)
+                            # PERBAIKAN: Menggunakan st.text_input dan mengonversi ke int
                             current_qty = int(st.session_state.cart_items[i].get('qty', 0))
-                            st.session_state.cart_items[i]['qty'] = st.number_input(
+                            qty_str = st.text_input(
                                 "Jumlah",
-                                min_value=min_val,
-                                max_value=max_val,
-                                value=current_qty,
-                                key=f"qty_{i}"
+                                value=str(current_qty),
+                                key=f"qty_str_{i}",
+                                help="Masukkan angka"
                             )
+                            try:
+                                qty = int(qty_str)
+                                st.session_state.cart_items[i]['qty'] = qty
+                            except ValueError:
+                                st.error(f"Jumlah untuk item {i+1} harus berupa angka. Menggunakan nilai 0.")
+                                st.session_state.cart_items[i]['qty'] = 0
                         
                         with col_yard:
+                            # PERBAIKAN: Menggunakan st.text_input dan mengonversi ke float
                             current_yard = float(st.session_state.cart_items[i].get('yard', 0.0))
-                            st.session_state.cart_items[i]['yard'] = st.number_input(
+                            yard_str = st.text_input(
                                 "Yard",
-                                min_value=0.0,
-                                value=current_yard,
-                                key=f"yard_input_{i}"
+                                value=str(current_yard),
+                                key=f"yard_str_{i}",
+                                help="Masukkan angka (desimal)"
                             )
+                            try:
+                                yard = float(yard_str)
+                                st.session_state.cart_items[i]['yard'] = yard
+                            except ValueError:
+                                st.error(f"Yard untuk item {i+1} harus berupa angka. Menggunakan nilai 0.0.")
+                                st.session_state.cart_items[i]['yard'] = 0.0
                         
                         current_keterangan = str(st.session_state.cart_items[i].get('keterangan', ''))
                         st.session_state.cart_items[i]['keterangan'] = st.text_area(f"Keterangan (opsional)", value=current_keterangan, key=f"keterangan_{i}")
@@ -953,18 +986,23 @@ def show_payroll_page():
                     nama = st.text_input("Nama Karyawan")
                 with col2:
                     bagian = st.text_input("Bagian")
-                gaji = st.number_input("Gaji Pokok", min_value=0.0)
+                # PERBAIKAN: Menggunakan st.text_input dan mengonversi ke float
+                gaji_str = st.text_input("Gaji Pokok", value="0.0", help="Masukkan angka")
                 
                 submitted = st.form_submit_button("Tambah Karyawan")
                 if submitted:
-                    if nama and bagian and gaji > 0:
-                        if add_employee(nama, bagian, gaji):
-                            st.success(f"Karyawan {nama} berhasil ditambahkan. ✅")
-                            st.rerun()
+                    try:
+                        gaji = float(gaji_str)
+                        if nama and bagian and gaji > 0:
+                            if add_employee(nama, bagian, gaji):
+                                st.success(f"Karyawan {nama} berhasil ditambahkan. ✅")
+                                st.rerun()
+                            else:
+                                st.error("Gagal menambahkan karyawan. Nama karyawan mungkin sudah ada.")
                         else:
-                            st.error("Gagal menambahkan karyawan. Nama karyawan mungkin sudah ada.")
-                    else:
-                        st.error("Semua field wajib diisi. ❌")
+                            st.error("Semua field wajib diisi. ❌")
+                    except ValueError:
+                        st.error("Gaji harus berupa angka. ❌")
 
         st.markdown("---")
         st.subheader("Daftar Karyawan")
@@ -988,18 +1026,22 @@ def show_payroll_page():
                     with col2:
                         edit_bagian = st.text_input("Bagian", value=selected_row['bagian'])
                     
-                    # Perbaikan: Menggunakan float() untuk memastikan nilai numerik
+                    # Perbaikan: Menggunakan st.text_input
                     gaji_pokok_value = float(selected_row['gaji_pokok']) if pd.notna(selected_row['gaji_pokok']) else 0.0
-                    edit_gaji = st.number_input("Gaji Pokok", value=gaji_pokok_value, min_value=0.0)
+                    edit_gaji_str = st.text_input("Gaji Pokok", value=str(gaji_pokok_value))
                     
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
                         if st.form_submit_button("Simpan Perubahan"):
-                            if update_employee(selected_employee_name, edit_nama, edit_bagian, edit_gaji):
-                                st.success("Data karyawan berhasil diperbarui! ✅")
-                                st.rerun()
-                            else:
-                                st.error("Gagal memperbarui data. Nama karyawan mungkin sudah ada.")
+                            try:
+                                edit_gaji = float(edit_gaji_str)
+                                if update_employee(selected_employee_name, edit_nama, edit_bagian, edit_gaji):
+                                    st.success("Data karyawan berhasil diperbarui! ✅")
+                                    st.rerun()
+                                else:
+                                    st.error("Gagal memperbarui data. Nama karyawan mungkin sudah ada.")
+                            except ValueError:
+                                st.error("Gaji harus berupa angka. Gagal menyimpan perubahan.")
                     with col_btn2:
                         if st.form_submit_button("Hapus Karyawan"):
                             if delete_employee(selected_employee_name):
@@ -1033,28 +1075,53 @@ def show_payroll_page():
                     gaji_bulan = selected_date.strftime('%B %Y')
                     
                     st.markdown("### Pendapatan")
-                    st.number_input("Gaji Pokok", value=selected_employee_data['gaji_pokok'], key="gaji_pokok_input", disabled=True)
-                    lembur = st.number_input("Lembur", min_value=0.0)
-                    lembur_minggu = st.number_input("Lembur Minggu", min_value=0.0)
-                    uang_makan = st.number_input("Uang Makan", min_value=0.0)
+                    st.text_input("Gaji Pokok", value=str(selected_employee_data['gaji_pokok']), disabled=True)
+                    lembur_str = st.text_input("Lembur", value="0.0")
+                    lembur_minggu_str = st.text_input("Lembur Minggu", value="0.0")
+                    uang_makan_str = st.text_input("Uang Makan", value="0.0")
                     
-                    total_pendapatan = selected_employee_data['gaji_pokok'] + lembur + lembur_minggu + uang_makan
+                    # Konversi dan hitung
+                    try:
+                        lembur = float(lembur_str)
+                        lembur_minggu = float(lembur_minggu_str)
+                        uang_makan = float(uang_makan_str)
+                        total_pendapatan = selected_employee_data['gaji_pokok'] + lembur + lembur_minggu + uang_makan
+                    except ValueError:
+                        st.error("Masukkan angka yang valid untuk perhitungan gaji. ❌")
+                        total_pendapatan = 0
+                    
                     st.markdown(f"**Total Pendapatan (1):** **Rp {total_pendapatan:,.2f}**")
                     
                     st.markdown("### Potongan")
-                    pot_absen_finger = st.number_input("Potongan Absen Finger", min_value=0.0)
-                    ijin_hr = st.number_input("Ijin HR", min_value=0.0)
+                    pot_absen_finger_str = st.text_input("Potongan Absen Finger", value="0.0")
+                    ijin_hr_str = st.text_input("Ijin HR", value="0.0")
                     
-                    total_setelah_potongan1 = total_pendapatan - pot_absen_finger - ijin_hr
+                    # Konversi dan hitung
+                    try:
+                        pot_absen_finger = float(pot_absen_finger_str)
+                        ijin_hr = float(ijin_hr_str)
+                        total_setelah_potongan1 = total_pendapatan - pot_absen_finger - ijin_hr
+                    except ValueError:
+                        st.error("Masukkan angka yang valid untuk potongan. ❌")
+                        total_setelah_potongan1 = total_pendapatan
+
                     st.markdown(f"**Total Setelah Potongan Absen (2):** **Rp {total_setelah_potongan1:,.2f}**")
                     
                     st.markdown("### Potongan Lain-lain")
-                    simpanan_wajib = st.number_input("Simpanan Wajib", min_value=0.0)
-                    potongan_koperasi = st.number_input("Potongan Koperasi", min_value=0.0)
-                    kasbon = st.number_input("Kasbon", min_value=0.0)
+                    simpanan_wajib_str = st.text_input("Simpanan Wajib", value="0.0")
+                    potongan_koperasi_str = st.text_input("Potongan Koperasi", value="0.0")
+                    kasbon_str = st.text_input("Kasbon", value="0.0")
 
-                    gaji_akhir = total_setelah_potongan1 - simpanan_wajib - potongan_koperasi - kasbon
-                    
+                    # Konversi dan hitung
+                    try:
+                        simpanan_wajib = float(simpanan_wajib_str)
+                        potongan_koperasi = float(potongan_koperasi_str)
+                        kasbon = float(kasbon_str)
+                        gaji_akhir = total_setelah_potongan1 - simpanan_wajib - potongan_koperasi - kasbon
+                    except ValueError:
+                        st.error("Masukkan angka yang valid untuk potongan lain-lain. ❌")
+                        gaji_akhir = total_setelah_potongan1
+
                     st.markdown(f"### **TOTAL GAJI AKHIR:** **Rp {gaji_akhir:,.2f}**")
                     
                     keterangan = st.text_area("Keterangan", help="Opsional")

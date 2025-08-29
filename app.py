@@ -1374,6 +1374,17 @@ def main():
             show_payroll_page()
         elif st.session_state['page'] == "Panduan Pengguna":
             show_user_guide()
+        
+        # --- Footer ---
+        st.markdown("---")
+        st.markdown("""
+            <div style="text-align: center; color: #888; font-size: 0.8rem; margin-top: 2rem;">
+                Aplikasi ini dibuat oleh **Galih Primananda** | Kontak: 
+                <a href="mailto:primetroyxs@gmail.com" target="_blank">Email</a> | 
+                <a href="https://www.linkedin.com/in/galihprime" target="_blank">LinkedIn</a> | 
+                <a href="https://www.instagram.com/glh_prima" target="_blank">Instagram</a>
+            </div>
+        """, unsafe_allow_html=True)
     else:
         login_page()
 

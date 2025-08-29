@@ -427,6 +427,7 @@ def get_payroll_records():
     
     return df_payroll[['tanggal_waktu', 'gaji_bulan', 'nama_karyawan', 'gaji_akhir', 'keterangan']]
 
+# PERBAIKAN: Fungsi ini telah diperbaiki untuk memastikan semua kolom ada
 def get_payroll_records_by_month(month_str):
     df_payroll = get_data_from_gsheets('payroll')
     df_employees = get_employees()
@@ -438,13 +439,20 @@ def get_payroll_records_by_month(month_str):
     
     df_payroll = df_payroll[df_payroll['gaji_bulan'] == month_str]
     
-    # Perbaikan: Pastikan kolom numerik dikonversi sebelum diolah
-    for col in ['gaji_pokok', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir']:
-        df_payroll[col] = pd.to_numeric(df_payroll[col], errors='coerce').fillna(0)
+    # Merge dataframes
+    merged_df = df_payroll.merge(df_employees, left_on='employee_id', right_on='id', how='left')
     
-    df_payroll = df_payroll.merge(df_employees, left_on='employee_id', right_on='id', how='left')
+    # PERBAIKAN: Pastikan kolom numerik dikonversi sebelum diolah, dan handle missing columns
+    for col in ['gaji_pokok_x', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir']:
+        if col in merged_df.columns:
+            merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0)
+        else:
+            merged_df[col] = 0.0 # Add a column with default value if it's missing
     
-    return df_payroll
+    # Rename gaji_pokok_x to gaji_pokok for consistency
+    merged_df.rename(columns={'gaji_pokok_x': 'gaji_pokok'}, inplace=True)
+    
+    return merged_df
 
 def generate_payslips_pdf(payslip_df):
     pdf = FPDF(orientation='P', unit='mm', format='A4')

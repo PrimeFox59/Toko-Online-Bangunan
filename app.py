@@ -1213,6 +1213,95 @@ def show_payroll_page():
         else:
             st.info("Belum ada riwayat penggajian.")
 
+# --- Panduan Pengguna ---
+def show_user_guide():
+    st.title("Panduan Pengguna 📖")
+    st.markdown("---")
+
+    st.header("1. Pendahuluan")
+    st.markdown("""
+    Selamat datang di **Sistem Kontrol Stok & Penggajian PT. Berkat Karya Anugerah**. Aplikasi ini dirancang untuk mempermudah Anda dalam mengelola stok barang dan proses penggajian karyawan secara efisien. Semua data akan otomatis tersimpan dan dikelola melalui Google Sheets.
+    """)
+
+    st.header("2. Menu Utama")
+    st.markdown("""
+    - **Dashboard 📈**: Melihat gambaran umum bisnis, seperti total nilai stok dan grafik stok terendah.
+    - **Master Barang 📦**: Mengelola data dasar barang (tambah, edit, hapus).
+    - **Barang Masuk 📥**: Mencatat setiap item yang masuk ke gudang.
+    - **Transaksi Keluar 🧾**: Mencatat penjualan dan membuat invoice secara otomatis.
+    - **Monitoring Stok 📊**: Melihat stok saat ini dan riwayat pergerakan stok (masuk/keluar).
+    - **Penggajian 💰**: Mengelola data karyawan, memproses gaji, dan mengunduh slip gaji.
+    """)
+
+    st.header("3. Panduan Langkah-demi-Langkah")
+
+    st.subheader("3.1 Menambahkan Barang Baru")
+    st.markdown("""
+    1.  Buka menu **Master Barang**.
+    2.  Pilih tab **➕ Tambah Barang Baru**.
+    3.  Isi formulir dengan detail barang, termasuk Kode Bahan, Nama Barang, Warna, Nama Supplier, Rak, dan Harga.
+    4.  Klik **💾 Simpan Barang**.
+    """)
+    st.info("**Penting:** Kombinasi Kode Bahan dan Warna harus unik.")
+
+    st.subheader("3.2 Mencatat Barang Masuk")
+    st.markdown("""
+    1.  Buka menu **Barang Masuk**.
+    2.  Pilih tab **➕ Input Barang Masuk Baru**.
+    3.  Pilih **Kode Bahan** dan **Warna** dari daftar yang sudah ada di Master Barang.
+    4.  Masukkan **Stok** dan **Yard** yang masuk.
+    5.  Klik **💾 Simpan Barang Masuk**.
+    """)
+
+    st.subheader("3.3 Membuat Transaksi Penjualan & Invoice")
+    st.markdown("""
+    1.  Buka menu **Transaksi Keluar**.
+    2.  Pilih tab **➕ Buat Transaksi & Invoice Baru**.
+    3.  Gunakan formulir **Keranjang Belanja** untuk menambahkan item yang dijual.
+    4.  Setelah semua item ditambahkan, isi **Nama Pelanggan**.
+    5.  Sesuaikan **Jumlah** dan **Yard** untuk setiap item yang akan dijual.
+    6.  Klik **💾 Simpan Transaksi & Buat Invoice**. Aplikasi akan otomatis mencetak invoice dan mengurangi stok.
+    """)
+    st.info("**Penting:** Pastikan stok mencukupi sebelum membuat transaksi.")
+
+    st.subheader("3.4 Memproses Penggajian")
+    st.markdown("""
+    1.  Buka menu **Penggajian**.
+    2.  Pilih tab **👥 Master Karyawan** untuk menambah, mengedit, atau menghapus data karyawan.
+    3.  Pilih tab **💸 Proses Penggajian**.
+    4.  Pilih nama karyawan dari daftar. Data dasar seperti Gaji Pokok akan terisi otomatis.
+    5.  Masukkan data lembur, uang makan, dan potongan lainnya.
+    6.  Klik **💾 Simpan Gaji**.
+    7.  Untuk mengunduh slip gaji, pilih tab **📝 Riwayat Penggajian**, pilih bulan, lalu klik **Unduh PDF**.
+    """)
+
+    st.header("4. Pertanyaan Umum (FAQ)")
+    
+    with st.expander("Q: Kenapa aplikasi menampilkan pesan 'Gagal terhubung ke Google Sheets'?", expanded=False):
+        st.markdown("""
+        **A:** Ini biasanya terjadi karena:
+        - File `secrets.toml` tidak ditemukan di direktori `.streamlit/`.
+        - Ada kesalahan dalam kunci API atau nama spreadsheet di file `secrets.toml`.
+        - Google Sheets API atau Google Drive API belum diaktifkan di Google Cloud.
+        """)
+        
+    with st.expander("Q: Kenapa data yang baru saya input tidak muncul di tabel?", expanded=False):
+        st.markdown("""
+        **A:** Aplikasi memiliki cache untuk mempercepat pemuatan data. Jika data baru tidak langsung muncul, silakan refresh halaman (tekan `F5` atau tombol refresh di browser) untuk memuat data terbaru.
+        """)
+
+    with st.expander("Q: Saya tidak bisa menambahkan item baru karena 'Kombinasi Kode Bahan dan Warna sudah ada.'", expanded=False):
+        st.markdown("""
+        **A:** Setiap item di master barang diidentifikasi secara unik oleh kombinasi Kode Bahan dan Warna. Pastikan Anda menggunakan kombinasi yang berbeda untuk item baru.
+        """)
+
+    st.header("5. Tips & Trik")
+    st.markdown("""
+    - **Refresh halaman** jika terjadi kesalahan atau data tidak sinkron.
+    - Gunakan fitur **Kelola Data** di setiap tab untuk mengedit atau menghapus data yang salah.
+    - **Backup** data Google Sheets Anda secara berkala dengan cara menduplikasi spreadsheet.
+    """)
+
 # --- Login & Main App Logic ---
 def login_page():
     st.title("Login Sistem Kontrol Stok")
@@ -1261,6 +1350,9 @@ def main():
         if st.sidebar.button("Penggajian 💰", use_container_width=True):
             st.session_state['page'] = "Penggajian"
             st.rerun()
+        if st.sidebar.button("Panduan Pengguna 📖", use_container_width=True):
+            st.session_state['page'] = "Panduan Pengguna"
+            st.rerun()
         
         st.sidebar.markdown("---")
         if st.sidebar.button("Logout 🚪", use_container_width=True):
@@ -1280,6 +1372,8 @@ def main():
             show_monitoring_stok()
         elif st.session_state['page'] == "Penggajian":
             show_payroll_page()
+        elif st.session_state['page'] == "Panduan Pengguna":
+            show_user_guide()
     else:
         login_page()
 

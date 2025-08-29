@@ -598,7 +598,6 @@ def show_dashboard():
     st.title("Dashboard Bisnis 📈")
     st.markdown("---")
 
-    st.markdown("---")
     master_df = get_master_barang()
     
     col_total_value, col_total_items = st.columns(2)
@@ -1428,4 +1427,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

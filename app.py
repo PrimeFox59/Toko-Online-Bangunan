@@ -596,12 +596,6 @@ def show_user_guide():
     **Adm Gudang** — fokus inventaris:
     - Dashboard 📈 • Master Barang 📦 • Barang Masuk 📥 • Monitoring Stok 📊 • Panduan ℹ️
 
-    > **Catatan awal (pertama kali berjalan):**  
-    - Jika sheet/worksheet belum ada, sistem akan **membuat otomatis** (lengkap dengan header).  
-    - Akun default akan dibuat bila tidak ditemukan:  
-      `owner / owner123`, `adm kasir / adm123`, `adm gudang / adm123`.  
-      (Ubah password langsung di worksheet **users** pada Google Sheets.)
-
     ---
 
     ## 🔑 Alur Global
@@ -1505,4 +1499,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

@@ -81,11 +81,11 @@ def check_and_create_worksheets():
     """Checks for required worksheets and creates them with headers if they don't exist."""
     required_worksheets = {
         "users": ['username', 'password_hash', 'role'],
-        "master_barang": ['kode_bahan', 'nama_supplier', 'nama_item', 'warna', 'rak', 'harga'],
+        "master_barang": ['kode_bahan', 'nama_supplier', 'nama_bahan', 'warna', 'rak', 'harga'],
         "barang_masuk": ['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'],
         "barang_keluar": ['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'],
         "invoices": ['invoice_number', 'tanggal_waktu', 'customer_name'],
-        "invoice_items": ['invoice_number', 'kode_bahan', 'nama_item', 'qty', 'harga', 'total'],
+        "invoice_items": ['invoice_number', 'kode_bahan', 'nama_bahan', 'qty', 'harga', 'total'],
         "employees": ['nama_karyawan', 'bagian', 'gaji_pokok'],
         "payroll": ['tanggal_waktu', 'gaji_bulan', 'employee_id', 'gaji_pokok', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir', 'keterangan']
     }
@@ -140,11 +140,11 @@ def create_excel_backup():
     try:
         # Nama worksheet dan header yang relevan
         worksheets_to_backup = {
-            "master_barang": ['kode_bahan', 'nama_supplier', 'nama_item', 'warna', 'rak', 'harga'],
+            "master_barang": ['kode_bahan', 'nama_supplier', 'nama_bahan', 'warna', 'rak', 'harga'],
             "barang_masuk": ['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'],
             "barang_keluar": ['tanggal_waktu', 'kode_bahan', 'warna', 'stok', 'yard', 'keterangan'],
             "invoices": ['invoice_number', 'tanggal_waktu', 'customer_name'],
-            "invoice_items": ['invoice_number', 'kode_bahan', 'nama_item', 'qty', 'harga', 'total'],
+            "invoice_items": ['invoice_number', 'kode_bahan', 'nama_bahan', 'qty', 'harga', 'total'],
             "employees": ['nama_karyawan', 'bagian', 'gaji_pokok'],
             "payroll": ['tanggal_waktu', 'gaji_bulan', 'employee_id', 'gaji_pokok', 'lembur', 'lembur_minggu', 'uang_makan', 'pot_absen_finger', 'ijin_hr', 'simpanan_wajib', 'potongan_koperasi', 'kasbon', 'gaji_akhir', 'keterangan']
         }
@@ -339,7 +339,7 @@ def generate_invoice_pdf(invoice_data, invoice_items):
     for idx, row in invoice_items.iterrows():
         total_invoice_amount += row['total']
         pdf.cell(10, 10, str(idx + 1), 1, 0, 'C')
-        pdf.cell(70, 10, row['nama_item'], 1)
+        pdf.cell(70, 10, row['nama_bahan'], 1)
         pdf.cell(30, 10, str(row['qty']), 1, 0, 'R')
         pdf.cell(40, 10, f"Rp {row['harga']:,.2f}", 1, 0, 'R')
         pdf.cell(40, 10, f"Rp {row['total']:,.2f}", 1, 1, 'R')
@@ -382,7 +382,7 @@ def add_barang_keluar_and_invoice(invoice_number, customer_name, items):
     for item in items:
         current_stock = get_stock_balance(item['kode_bahan'], item['warna'])
         if item['qty'] > current_stock:
-            return False, f"Stok untuk item {item['nama_item']} ({item['warna']}) tidak mencukupi. Stok saat ini: {current_stock}"
+            return False, f"Stok untuk item {item['nama_bahan']} ({item['warna']}) tidak mencukupi. Stok saat ini: {current_stock}"
 
     # Insert into invoices table
     if not append_row_to_gsheet('invoices', [invoice_number, tanggal_waktu, customer_name]):
@@ -390,7 +390,7 @@ def add_barang_keluar_and_invoice(invoice_number, customer_name, items):
     
     # Insert items and outgoing goods
     for item in items:
-        if not append_row_to_gsheet('invoice_items', [invoice_number, item['kode_bahan'], item['nama_item'], item['qty'], item['harga'], item['total']]):
+        if not append_row_to_gsheet('invoice_items', [invoice_number, item['kode_bahan'], item['nama_bahan'], item['qty'], item['harga'], item['total']]):
             return False, "Gagal menambahkan item ke invoice."
         if not append_row_to_gsheet('barang_keluar', [tanggal_waktu, item['kode_bahan'], item['warna'], item['qty'], item['yard'], item['keterangan']]):
             return False, "Gagal mencatat barang keluar."
@@ -596,7 +596,7 @@ def show_dashboard():
     st.header("Stok 10 Item Terendah")
     if not master_df.empty:
         low_stock_df = master_df.sort_values(by='Stok Saat Ini', ascending=True).head(10)
-        low_stock_df['label'] = low_stock_df['nama_item'] + ' (' + low_stock_df['warna'] + ')'
+        low_stock_df['label'] = low_stock_df['nama_bahan'] + ' (' + low_stock_df['warna'] + ')'
         
         if not low_stock_df.empty:
             fig = px.bar(low_stock_df, 
@@ -628,14 +628,14 @@ def show_master_barang():
                     nama_supplier = st.text_input("Nama Supplier")
                     warna = st.text_input("Warna").lower()
                 with col2:
-                    nama_item = st.text_input("Nama Item")
+                    nama_bahan = st.text_input("Nama Item")
                     rak = st.text_input("Rak")
                     harga = st.number_input("Harga", min_value=0.0)
                 
                 submitted = st.form_submit_button("💾 Simpan Barang")
                 if submitted:
-                    if add_master_item(kode_bahan, nama_supplier, nama_item, warna, rak, harga):
-                        st.success(f"Barang **{nama_item}** dengan warna **{warna}** berhasil ditambahkan. ✅")
+                    if add_master_item(kode_bahan, nama_supplier, nama_bahan, warna, rak, harga):
+                        st.success(f"Barang **{nama_bahan}** dengan warna **{warna}** berhasil ditambahkan. ✅")
                         st.rerun()
                     else:
                         st.error("Kombinasi Kode Bahan dan Warna tersebut sudah ada. ❌")
@@ -666,7 +666,7 @@ def show_master_barang():
                             col1, col2 = st.columns(2)
                             with col1:
                                 new_kode_bahan = st.text_input("Kode Bahan Baru", value=selected_row['kode_bahan']).upper()
-                                new_nama_item = st.text_input("Nama Item", value=selected_row['nama_item'])
+                                new_nama_bahan = st.text_input("Nama Item", value=selected_row['nama_bahan'])
                                 new_rak = st.text_input("Rak", value=selected_row['rak'])
                             with col2:
                                 new_warna = st.text_input("Warna Baru", value=selected_row['warna']).lower()
@@ -676,7 +676,7 @@ def show_master_barang():
                             col_btn1, col_btn2 = st.columns(2)
                             with col_btn1:
                                 if st.form_submit_button("Simpan Perubahan"):
-                                    if update_master_item(selected_row['kode_bahan'], selected_row['warna'], new_kode_bahan, new_warna, new_nama_supplier, new_nama_item, new_rak, new_harga):
+                                    if update_master_item(selected_row['kode_bahan'], selected_row['warna'], new_kode_bahan, new_warna, new_nama_supplier, new_nama_bahan, new_rak, new_harga):
                                         st.success("Data berhasil diperbarui! ✅")
                                         st.rerun()
                                     else:
@@ -812,7 +812,7 @@ def show_transaksi_keluar_invoice_page():
         st.warning("Belum ada master barang. Silakan tambahkan di menu Master Barang. ⚠️")
         return
 
-    master_df['display_name'] = master_df['kode_bahan'] + ' - ' + master_df['nama_item'] + ' (' + master_df['warna'] + ')'
+    master_df['display_name'] = master_df['kode_bahan'] + ' - ' + master_df['nama_bahan'] + ' (' + master_df['warna'] + ')'
     item_options = master_df['display_name'].tolist()
 
     if 'cart_items' not in st.session_state:
@@ -836,7 +836,7 @@ def show_transaksi_keluar_invoice_page():
                     harga_cleaned = float(selected_item_data['harga']) if pd.notna(selected_item_data['harga']) else 0.0
                     new_item = {
                         "kode_bahan": selected_item_data['kode_bahan'],
-                        "nama_item": selected_item_data['nama_item'],
+                        "nama_bahan": selected_item_data['nama_bahan'],
                         "warna": selected_item_data['warna'],
                         "harga": harga_cleaned,
                         "qty": 0,
@@ -855,7 +855,7 @@ def show_transaksi_keluar_invoice_page():
                     col_item_display, col_delete_btn = st.columns([0.9, 0.1])
                     
                     with col_item_display:
-                        st.markdown(f"**Item {i+1}:** `{item['nama_item']} ({item['warna']})`")
+                        st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
                     
                     with col_delete_btn:
                         if st.button("🗑️", key=f"delete_btn_{i}"):
@@ -870,7 +870,7 @@ def show_transaksi_keluar_invoice_page():
             if 'cart_items' in st.session_state:
                 for i, item in enumerate(st.session_state['cart_items']):
                     with st.container(border=True):
-                        st.markdown(f"**Item {i+1}:** `{item['nama_item']} ({item['warna']})`")
+                        st.markdown(f"**Item {i+1}:** `{item['nama_bahan']} ({item['warna']})`")
                         stok_saat_ini = get_stock_balance(item['kode_bahan'], item['warna'])
                         
                         col_qty, col_yard = st.columns(2)
@@ -942,8 +942,8 @@ def show_transaksi_keluar_invoice_page():
                 st.subheader(f"Detail Invoice: {selected_invoice}")
                 st.write(f"**Nama Pelanggan:** {invoice_data['Nama Pelanggan']}")
                 st.write(f"**Tanggal:** {invoice_data['Tanggal & Waktu']}")
-                st.dataframe(invoice_items_df[['nama_item', 'qty', 'harga', 'total']].rename(columns={
-                    'nama_item': 'Nama Item',
+                st.dataframe(invoice_items_df[['nama_bahan', 'qty', 'harga', 'total']].rename(columns={
+                    'nama_bahan': 'Nama Item',
                     'qty': 'Qty',
                     'harga': 'Harga',
                     'total': 'Total'
@@ -967,7 +967,7 @@ def show_monitoring_stok():
     master_df = get_master_barang()
     if not master_df.empty:
         master_df['Stok Saat Ini'] = master_df.apply(lambda row: get_stock_balance(row['kode_bahan'], row['warna']), axis=1)
-        df_display = master_df[['kode_bahan', 'nama_item', 'warna', 'Stok Saat Ini']].copy()
+        df_display = master_df[['kode_bahan', 'nama_bahan', 'warna', 'Stok Saat Ini']].copy()
         st.dataframe(df_display, use_container_width=True, hide_index=True)
     else:
         st.warning("Belum ada master barang.")
@@ -1264,3 +1264,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

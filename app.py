@@ -8,8 +8,12 @@ import plotly.express as px
 import gspread
 from gspread.exceptions import WorksheetNotFound
 
-# --- TATA LETAK LEBAR & CUSTOM CSS ---
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="PT. BKA - Sistem Kontrol Stok & Penggajian",
+    page_icon="🛍️",   # ikon toko / belanja
+    layout="wide"
+)
+
 
 st.markdown("""
 <style>
@@ -577,39 +581,220 @@ def show_user_guide():
     st.title("Panduan Pengguna ℹ️")
     st.markdown("---")
     st.markdown("""
-        Selamat datang di **Sistem Kontrol Stok & Penggajian PT. Berkat Karya Anugerah**.
-        Aplikasi ini dirancang untuk mempermudah manajemen inventaris dan penggajian Anda.
+    Selamat datang di **Sistem Kontrol Stok & Penggajian PT. Berkat Karya Anugerah**.  
+    Aplikasi ini membantu mengelola **inventaris**, **penjualan + invoice**, serta **penggajian** berbasis Google Sheets.
 
-        ### Akses Menu Berdasarkan Peran
-        * **Owner (Pemilik):** Memiliki akses penuh ke semua fitur aplikasi:
-            * Dashboard
-            * Master Barang
-            * Barang Masuk
-            * Transaksi Keluar
-            * Monitoring Stok
-            * Penggajian
-            * Panduan Pengguna
-        
-        * **Adm Kasir (Admin Kasir):** Fokus pada transaksi penjualan:
-            * Dashboard
-            * Transaksi Keluar (Penjualan)
-            * Monitoring Stok
-            * Panduan Pengguna
-        
-        * **Adm Gudang (Admin Gudang):** Bertanggung jawab atas inventaris:
-            * Dashboard
-            * Master Barang (Tambah, Edit, Hapus data barang)
-            * Barang Masuk (Catat barang masuk)
-            * Monitoring Stok
-            * Panduan Pengguna
+    ---
 
-        ### Cara Menggunakan Aplikasi
-        1.  **Login:** Masuk dengan nama pengguna dan kata sandi yang telah diberikan.
-        2.  **Navigasi:** Gunakan menu di sisi kiri untuk berpindah antar halaman.
-        3.  **Input Data:** Gunakan formulir di setiap halaman untuk memasukkan data master barang, barang masuk, transaksi keluar, atau data penggajian.
-        4.  **Monitoring:** Halaman **Monitoring Stok** menyediakan laporan dan grafik untuk memantau inventaris secara real-time.
-        5.  **Cetak Dokumen:** Anda dapat mencetak Invoice atau Slip Gaji dalam format PDF langsung dari aplikasi.
+    ## 👥 Peran & Akses Menu
+    **Owner (Pemilik)** — akses penuh:
+    - Dashboard 📈 • Master Barang 📦 • Barang Masuk 📥 • Transaksi Keluar 🧾 • Monitoring Stok 📊 • Penggajian 💰 • Panduan ℹ️
+
+    **Adm Kasir** — fokus penjualan:
+    - Dashboard 📈 • Transaksi Keluar 🧾 • Monitoring Stok 📊 • Panduan ℹ️
+
+    **Adm Gudang** — fokus inventaris:
+    - Dashboard 📈 • Master Barang 📦 • Barang Masuk 📥 • Monitoring Stok 📊 • Panduan ℹ️
+
+    > **Catatan awal (pertama kali berjalan):**  
+    - Jika sheet/worksheet belum ada, sistem akan **membuat otomatis** (lengkap dengan header).  
+    - Akun default akan dibuat bila tidak ditemukan:  
+      `owner / owner123`, `adm kasir / adm123`, `adm gudang / adm123`.  
+      (Ubah password langsung di worksheet **users** pada Google Sheets.)
+
+    ---
+
+    ## 🔑 Alur Global
+    1) **Login** → Masukkan *username* & *password* sesuai peran, klik **Login**.  
+    2) **Navigasi** → Gunakan **sidebar** untuk ganti halaman (menu yang tampil mengikuti peran).  
+    3) **Input & Kelola Data** → Ikuti formulir di tiap halaman.  
+    4) **Unduh Dokumen** → Invoice & Slip Gaji (PDF), Backup (Excel).  
+    5) **Logout** → Klik **Logout** di sidebar.
+
+    ---
+
+    ## ⌨️ Perilaku Tombol & Keyboard (Penting!)
+    - Semua formulir utama menggunakan tombol **Simpan** di dalam `form`.  
+      **Tekan Enter = Submit Form** *jika fokus* berada pada **input satu baris** (text/number/select).  
+    - **Khusus kolom `Keterangan`** (tipe *text area*):
+      - **Enter** akan **menambah baris baru**, **bukan** submit.
+      - Untuk submit, klik tombol **Simpan** (disarankan) atau pindahkan fokus dari text area lalu tekan **Enter**.
+    - Setelah simpan berhasil, halaman akan **refresh otomatis** (indikasi: pesan sukses + data terbarui).
+
+    ---
+
+    ## 📈 Dashboard
+    **Ringkasan bisnis**:
+    - **Total Nilai Stok** & **Total Barang** (otomatis dari master barang + pergerakan stok).  
+    - Grafik **10 stok terendah** → membantu prioritas restock.
+    **Tips**:
+    - Jika kosong, berarti **belum ada master barang** atau stok masih 0.
+
+    ---
+
+    ## 📦 Master Barang (Owner, Adm Gudang)
+    ### A. Tambah Barang Baru
+    - Isi:
+      - **Kode Bahan** → otomatis disimpan **UPPERCASE**.
+      - **Nama Supplier**, **Nama Bahan**
+      - **Warna** → otomatis disimpan **lowercase**.
+      - **Rak**
+      - **Harga** (angka).  
+    - Klik **💾 Simpan Barang**.
+    - **Validasi unik**: kombinasi **Kode Bahan + Warna** tidak boleh duplikat. Jika duplikat → muncul pesan **gagal**.
+    - **Enter** saat fokus di input satu baris → submit form.  
+      Saat mengetik di **Keterangan** (jika ada) → Enter hanya menambah baris.
+
+    ### B. Daftar & Kelola
+    - Tabel menampilkan semua barang (dengan harga).  
+    - **Edit**:
+      - Pilih barang → ubah field yang perlu → **Simpan Perubahan**.
+      - Jika mengubah **Kode/Warna** menjadi kombinasi yang **sudah ada**, penyimpanan akan **ditolak**.
+    - **Hapus**:
+      - Pilih barang → **Hapus Barang**.
+    - Setelah **Simpan/Hapus**, halaman **refresh otomatis**.
+
+    ---
+
+    ## 📥 Barang Masuk (Owner, Adm Gudang)
+    ### A. Input Barang Masuk Baru
+    1) **Pilih Kode Bahan** → daftar diambil dari Master Barang.  
+    2) **Pilih Warna** → otomatis terfilter sesuai kode bahan.  
+    3) Isi **Stok** (≥ 1), **Yard** (≥ 0), **Keterangan** (opsional).  
+    4) Klik **💾 Simpan Barang Masuk**.
+
+    **Tentang Enter di form ini**:
+    - Jika fokus berada di **Kode/Warna/Stok/Yard** → **Enter = submit** data masuk.
+    - Jika fokus berada di **Keterangan** (text area) → **Enter menambah baris**, **tidak** submit.
+
+    **Setelah Simpan**:
+    - Sistem menambahkan baris dengan waktu sekarang (**Tanggal & Waktu** otomatis).
+    - Halaman **refresh** dan data tampil di tabel di bawahnya.
+
+    ### B. Daftar & Kelola Barang Masuk
+    - Lihat riwayat **Barang Masuk** (tanggal, kode, warna, stok, yard, keterangan).
+    - **Edit**:
+      - Pilih baris unik (gabungan beberapa kolom) → ubah field → **Simpan Perubahan**.
+      - Jika **Kode/Warna** yang direferensikan **sudah dihapus** dari Master Barang, aplikasi akan **memperingatkan** dan memilih opsi pertama yang tersedia.
+    - **Hapus**:
+      - Pilih baris → **Hapus Data**.
+    - **Enter** saat mengedit di input baris → **submit**; di text area keterangan → **Enter menambah baris**.
+    - Setelah simpan/hapus → halaman **refresh**.
+
+    ---
+
+    ## 🧾 Transaksi Keluar & Invoice (Owner, Adm Kasir)
+    ### A. Menambah Item ke Keranjang
+    - Pilih item dari daftar (format: `KODE - NAMA (warna)`), klik **➕ Tambah Item**.  
+    - Item tampil dalam **keranjang**:
+      - Atur **Jumlah** (dibatasi maksimal **stok tersedia**).
+      - Atur **Yard** (opsional).
+      - Isi **Keterangan** per item (opsional).
+      - Lihat **Harga Satuan** & **Total per Item**.
+      - Hapus item dengan tombol **🗑️**.
+
+    **Tentang Enter di bagian ini**:
+    - Saat fokus di **Jumlah/Yard** → **Enter** akan **submit form transaksi** jika tombol simpan ada di form yang sama.  
+      **Saran:** isi semua item dulu, lalu klik **💾 Simpan Transaksi & Buat Invoice**.
+    - Di **Keterangan** (text area) → **Enter menambah baris**, bukan submit.
+
+    ### B. Simpan Transaksi & Buat Invoice
+    - Isi **Nama Pelanggan** (wajib).  
+    - Klik **💾 Simpan Transaksi & Buat Invoice**.
+    - Sistem akan:
+      1) **Validasi stok** setiap item (tidak boleh melebihi stok tersedia).  
+         Jika kurang, muncul pesan **Stok tidak mencukupi** (menyebut item & stok saat ini).
+      2) Membuat **Nomor Invoice** otomatis: `INV-YYMMDD-XXX` (urut harian).
+      3) Menyimpan header invoice + item detail, dan mencatat **Barang Keluar**.
+      4) Mengosongkan keranjang & menampilkan pesan **berhasil** (dengan animasi 🎈).
+
+    ### C. Riwayat & Unduh Invoice
+    - Lihat tabel riwayat invoice.  
+    - Pilih **No Invoice** → **Tampilkan & Unduh Invoice**:
+      - Lihat rincian (item, qty, harga, total).
+      - Unduh **PDF** invoice.
+
+    ---
+
+    ## 📊 Monitoring Stok (Owner, Adm Kasir, Adm Gudang)
+    - **Stok Saat Ini** → hitungan real-time dari (Masuk − Keluar) untuk setiap **Kode + Warna**.  
+    - **Rekam Jejak Stok**:
+      - Pilih **Tanggal Mulai** & **Tanggal Selesai** → klik **Tampilkan Rekam Jejak**.
+      - Tabel gabungan **Masuk** dan **Keluar** berurutan waktu.
+    - **Backup Data 💾**:
+      - Klik **Buat & Unduh Backup Data Lengkap** → menghasilkan file **Excel** berisi sheet:
+        `master_barang`, `barang_masuk`, `barang_keluar`, `invoices`, `invoice_items`,
+        `employees`, `payroll`.  
+      - Sheet kosong tetap dibuat dengan **header** agar konsisten.
+
+    **Catatan Enter**:
+    - Tombol backup bukan form → **Enter tidak memicu** proses. Klik tombolnya.
+
+    ---
+
+    ## 💰 Penggajian (Owner)
+    ### A. Master Karyawan
+    - **Tambah**: Nama, Bagian, **Gaji Pokok per Hari** (angka).  
+      Jika nama sudah ada → tambah **ditolak**.
+    - **Edit/Hapus** karyawan dari daftar.
+
+    ### B. Proses Penggajian Bulanan
+    1) Pilih karyawan (format: `ID - Nama (Bagian)`).
+    2) Pilih **Tanggal Gaji** → sistem membentuk label **Bulan Gaji** (misal: *September 2025*).
+    3) **Pendapatan**:
+       - **Gaji per Hari** (terkunci dari master) × **Jumlah Hari Masuk** → **Gaji Pokok (Total)**.
+       - Tambah **Lembur**, **Lembur Minggu**, **Uang Makan**.
+    4) **Potongan**:
+       - **Potongan Absen Finger**, **Ijin HR**.
+    5) **Potongan Lain**:
+       - **Simpanan Wajib**, **Potongan Koperasi**, **Kasbon**.
+    6) Sistem menghitung **TOTAL GAJI AKHIR** otomatis.
+    7) Klik **💾 Simpan Gaji**.
+
+    **Tentang Enter**:
+    - Saat fokus di input angka pada form ini → **Enter = submit**.  
+      **Saran:** klik tombol **Simpan Gaji** agar tidak tersubmit sebelum siap.
+
+    ### C. Riwayat & Slip Gaji
+    - Pilih **Bulan Gaji** → **Unduh PDF** berisi **semua slip** untuk bulan tersebut.  
+    - Tabel riwayat menampilkan tanggal (dengan nama bulan **Indonesia**), karyawan, gaji akhir, keterangan.
+
+    ---
+
+    ## 🧩 Aturan Data & Perhitungan (Ringkas)
+    - **Stok Saat Ini** = ∑(Barang Masuk) − ∑(Barang Keluar) per **Kode + Warna**.  
+    - **Duplikat Master Barang** ditolak jika **Kode + Warna** sudah ada.  
+    - **Harga**, **Gaji**, dan komponen angka lainnya otomatis dikonversi ke numerik (non-angka → 0).  
+    - **Format Invoice**: `INV-YYMMDD-XXX` (contoh: `INV-250903-001`).  
+    - **Waktu Transaksi** diset otomatis saat penyimpanan (*server time*).
+
+    ---
+
+    ## 🛠️ FAQ & Troubleshooting
+    - **"Worksheet '...' tidak ditemukan. Membuat sekarang..."**  
+      → Normal pada penggunaan pertama; sistem membuat sheet + header otomatis.
+    - **"Kombinasi Kode Bahan dan Warna sudah ada."**  
+      → Ubah salah satu agar unik.
+    - **"Belum ada master barang."**  
+      → Tambah barang di **Master Barang** dulu (wajib sebelum *Barang Masuk* / *Penjualan*).
+    - **"Stok tidak mencukupi" saat simpan transaksi**  
+      → Kurangi jumlah sesuai stok tampil atau tambah stok di **Barang Masuk**.
+    - **Perubahan tidak terlihat**  
+      → Setelah simpan berhasil, halaman otomatis refresh. Jika belum, lakukan refresh manual browser.
+
+    ---
+
+    ## 🚪 Logout
+    Klik **Logout** di sidebar → sesi dihapus, kembali ke halaman login.
+
+    --- 
+
+    ## 💡 Tips Penggunaan Cepat
+    - **Enter untuk submit** saat fokus di input satu baris; **Enter di text area** hanya menambah baris.  
+    - Di **Transaksi Keluar**, atur semua item dulu baru klik **Simpan** agar tidak tersubmit dini.  
+    - Rutin lakukan **Backup Excel** dari menu **Monitoring Stok**.
     """)
+
 
 def show_dashboard():
     st.title("Dashboard Bisnis 📈")
@@ -1320,3 +1505,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -629,13 +629,13 @@ def show_user_guide():
     ## 📦 Master Barang (Owner, Adm Gudang)
     ### A. Tambah Barang Baru
     - Isi:
-      - **Kode Bahan** → otomatis disimpan **UPPERCASE**.
-      - **Nama Supplier**, **Nama Bahan**
+      - **Kode barang** → otomatis disimpan **UPPERCASE**.
+      - **Nama Supplier**, **Nama Item**
       - **Warna** → otomatis disimpan **lowercase**.
       - **Rak**
       - **Harga** (angka).  
     - Klik **💾 Simpan Barang**.
-    - **Validasi unik**: kombinasi **Kode Bahan + Warna** tidak boleh duplikat. Jika duplikat → muncul pesan **gagal**.
+    - **Validasi unik**: kombinasi **Kode barang + Warna** tidak boleh duplikat. Jika duplikat → muncul pesan **gagal**.
     - **Enter** saat fokus di input satu baris → submit form.  
       Saat mengetik di **Keterangan** (jika ada) → Enter hanya menambah baris.
 
@@ -652,8 +652,8 @@ def show_user_guide():
 
     ## 📥 Barang Masuk (Owner, Adm Gudang)
     ### A. Input Barang Masuk Baru
-    1) **Pilih Kode Bahan** → daftar diambil dari Master Barang.  
-    2) **Pilih Warna** → otomatis terfilter sesuai kode bahan.  
+    1) **Pilih Kode barang** → daftar diambil dari Master Barang.  
+    2) **Pilih Warna** → otomatis terfilter sesuai Kode barang.  
     3) Isi **Stok** (≥ 1), **Yard** (≥ 0), **Keterangan** (opsional).  
     4) Klik **💾 Simpan Barang Masuk**.
 
@@ -767,7 +767,7 @@ def show_user_guide():
     ## 🛠️ FAQ & Troubleshooting
     - **"Worksheet '...' tidak ditemukan. Membuat sekarang..."**  
       → Normal pada penggunaan pertama; sistem membuat sheet + header otomatis.
-    - **"Kombinasi Kode Bahan dan Warna sudah ada."**  
+    - **"Kombinasi Kode barang dan Warna sudah ada."**  
       → Ubah salah satu agar unik.
     - **"Belum ada master barang."**  
       → Tambah barang di **Master Barang** dulu (wajib sebelum *Barang Masuk* / *Penjualan*).
@@ -823,7 +823,7 @@ def show_dashboard():
                          x='label', 
                          y='Stok Saat Ini',
                          title='10 Item dengan Stok Terendah',
-                         labels={'label': 'Nama Bahan', 'Stok Saat Ini': 'Jumlah Stok'},
+                         labels={'label': 'Nama Item', 'Stok Saat Ini': 'Jumlah Stok'},
                          color='Stok Saat Ini',
                          color_continuous_scale=px.colors.sequential.Sunset
                          )
@@ -844,11 +844,11 @@ def show_master_barang():
             with st.form("add_item_form"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    kode_bahan = st.text_input("Kode Bahan").upper()
+                    kode_bahan = st.text_input("Kode barang").upper()
                     nama_supplier = st.text_input("Nama Supplier")
                     warna = st.text_input("Warna").lower()
                 with col2:
-                    nama_bahan = st.text_input("Nama Bahan")
+                    nama_bahan = st.text_input("Nama Item")
                     rak = st.text_input("Rak")
                     harga = st.number_input("Harga", min_value=0.0)
                 
@@ -858,7 +858,7 @@ def show_master_barang():
                         st.success(f"Barang **{nama_bahan}** dengan warna **{warna}** berhasil ditambahkan. ✅")
                         st.rerun()
                     else:
-                        st.error("Kombinasi Kode Bahan dan Warna tersebut sudah ada. ❌")
+                        st.error("Kombinasi Kode barang dan Warna tersebut sudah ada. ❌")
     
     with tab_list:
         st.subheader("Daftar Barang")
@@ -870,7 +870,7 @@ def show_master_barang():
             st.markdown("---")
             with st.expander("Kelola Data Master"):
                 item_options_map = {f"{row['kode_bahan']} ({row['warna']})": (row['kode_bahan'], row['warna']) for _, row in df.iterrows()}
-                item_to_edit_str = st.selectbox("Pilih Kode Bahan (Warna)", list(item_options_map.keys()), key="select_edit_master")
+                item_to_edit_str = st.selectbox("Pilih Kode barang (Warna)", list(item_options_map.keys()), key="select_edit_master")
                 
                 if item_to_edit_str:
                     selected_kode, selected_warna = item_options_map[item_to_edit_str]
@@ -885,8 +885,8 @@ def show_master_barang():
                         with st.form("edit_master_form"):
                             col1, col2 = st.columns(2)
                             with col1:
-                                new_kode_bahan = st.text_input("Kode Bahan Baru", value=selected_row['kode_bahan']).upper()
-                                new_nama_bahan = st.text_input("Nama Bahan", value=selected_row['nama_bahan'])
+                                new_kode_bahan = st.text_input("Kode barang Baru", value=selected_row['kode_bahan']).upper()
+                                new_nama_bahan = st.text_input("Nama Item", value=selected_row['nama_bahan'])
                                 new_rak = st.text_input("Rak", value=selected_row['rak'])
                             with col2:
                                 new_warna = st.text_input("Warna Baru", value=selected_row['warna']).lower()
@@ -900,7 +900,7 @@ def show_master_barang():
                                         st.success("Data berhasil diperbarui! ✅")
                                         st.rerun()
                                     else:
-                                        st.error("Kombinasi Kode Bahan dan Warna baru sudah ada. Gagal menyimpan perubahan. ❌")
+                                        st.error("Kombinasi Kode barang dan Warna baru sudah ada. Gagal menyimpan perubahan. ❌")
                             with col_btn2:
                                 if st.form_submit_button("Hapus Barang"):
                                     if delete_master_item(selected_row['kode_bahan'], selected_row['warna']):
@@ -930,7 +930,7 @@ def show_input_masuk():
                 col1, col2 = st.columns(2)
                 with col1:
                     kode_bahan_options = master_df['kode_bahan'].unique().tolist()
-                    selected_kode_bahan = st.selectbox("Pilih Kode Bahan", kode_bahan_options, key="in_kode_bahan")
+                    selected_kode_bahan = st.selectbox("Pilih Kode barang", kode_bahan_options, key="in_kode_bahan")
                 
                 with col2:
                     filtered_colors = master_df[master_df['kode_bahan'] == selected_kode_bahan]['warna'].tolist()
@@ -976,10 +976,10 @@ def show_input_masuk():
                         try:
                             selected_kode_index = kode_bahan_options.index(selected_row['kode_bahan'])
                         except ValueError:
-                            st.warning(f"Kode Bahan '{selected_row['kode_bahan']}' tidak ditemukan di Master Barang. Data master mungkin telah dihapus.")
+                            st.warning(f"Kode barang '{selected_row['kode_bahan']}' tidak ditemukan di Master Barang. Data master mungkin telah dihapus.")
                             selected_kode_index = 0
                             
-                        edit_kode_bahan = st.selectbox("Kode Bahan", kode_bahan_options, index=selected_kode_index, key="edit_in_kode")
+                        edit_kode_bahan = st.selectbox("Kode barang", kode_bahan_options, index=selected_kode_index, key="edit_in_kode")
                         
                         filtered_colors_edit = master_df[master_df['kode_bahan'] == edit_kode_bahan]['warna'].tolist()
                         
@@ -987,7 +987,7 @@ def show_input_masuk():
                         try:
                             selected_warna_index = filtered_colors_edit.index(selected_row['warna'])
                         except ValueError:
-                            st.warning(f"Warna '{selected_row['warna']}' untuk Kode Bahan yang dipilih tidak ditemukan di Master Barang.")
+                            st.warning(f"Warna '{selected_row['warna']}' untuk Kode barang yang dipilih tidak ditemukan di Master Barang.")
                             selected_warna_index = 0
                             
                         edit_warna = st.selectbox("Warna", filtered_colors_edit, index=selected_warna_index, key="edit_in_warna")
@@ -1163,7 +1163,7 @@ def show_transaksi_keluar_invoice_page():
                 st.write(f"**Nama Pelanggan:** {invoice_data['Nama Pelanggan']}")
                 st.write(f"**Tanggal:** {invoice_data['Tanggal & Waktu']}")
                 st.dataframe(invoice_items_df[['nama_bahan', 'qty', 'harga', 'total']].rename(columns={
-                    'nama_bahan': 'Nama Bahan',
+                    'nama_bahan': 'Nama Item',
                     'qty': 'Qty',
                     'harga': 'Harga',
                     'total': 'Total'
@@ -1499,5 +1499,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

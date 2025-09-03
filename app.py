@@ -8,7 +8,9 @@ import plotly.express as px
 import gspread
 from gspread.exceptions import WorksheetNotFound
 
-# --- CUSTOM CSS FOR UI/UX IMPROVEMENTS ---
+# --- TATA LETAK LEBAR & CUSTOM CSS ---
+st.set_page_config(layout="wide")
+
 st.markdown("""
 <style>
     .reportview-container {
@@ -173,27 +175,28 @@ def create_excel_backup():
 def get_user_data():
     return get_data_from_gsheets('users')
 
+# PERBAIKAN: Mengembalikan role saat login berhasil
 def check_login(username, password):
     users_df = get_user_data()
     user = users_df[users_df['username'] == username]
     if not user.empty:
-        stored_password_hash = user.iloc[0]['password_hash']
-        # This part is a bit tricky with gsheets.
-        # bcrypt hash is a binary object. gsheets stores it as a string.
-        # We'll just do a simple password check for simplicity.
-        # For production, a more robust solution would be needed.
-        return password == stored_password_hash
-    return False
+        stored_password = user.iloc[0]['password_hash'] # Menggunakan password_hash sebagai password plain text untuk demo
+        role = user.iloc[0]['role']
+        if password == stored_password:
+            return True, role
+    return False, None
 
 def check_and_create_owner():
     users_df = get_data_from_gsheets('users')
     if users_df.empty or 'owner' not in users_df['username'].tolist():
         st.warning("Pengguna 'owner' tidak ditemukan. Membuat sekarang...")
-        # Note: In a real-world app, you'd want to hash this password.
-        # But to simplify for gsheets, we'll store it as plain text.
-        # For a robust solution, you would need to hash the password before storing it.
-        if append_row_to_gsheet('users', ['owner', 'owner123', 'admin']):
+        if append_row_to_gsheet('users', ['owner', 'owner123', 'owner']):
             st.success("Pengguna 'owner' berhasil dibuat.")
+        # Tambahkan pengguna 'adm kasir' dan 'adm gudang' jika belum ada
+        if 'adm kasir' not in users_df['username'].tolist():
+            append_row_to_gsheet('users', ['adm kasir', 'adm123', 'adm kasir'])
+        if 'adm gudang' not in users_df['username'].tolist():
+            append_row_to_gsheet('users', ['adm gudang', 'adm123', 'adm gudang'])
 
 # --- CRUD Functions - Inventory ---
 def add_master_item(kode, supplier, nama, warna, rak, harga):
@@ -247,7 +250,7 @@ def update_barang_masuk(row_index, tanggal_waktu, kode_bahan, warna, stok, yard,
     return update_row_in_gsheet('barang_masuk', row_index, [tanggal_waktu, kode_bahan, warna, stok, yard, keterangan])
 
 def delete_barang_masuk(row_index):
-    return delete_row_from_gsheet('barang_index', row_index)
+    return delete_row_from_gsheet('barang_masuk', row_index)
 
 def get_stock_balance(kode_bahan, warna):
     df_in = get_barang_masuk()
@@ -570,6 +573,44 @@ def generate_payslips_pdf(payslip_df):
 
     return pdf.output(dest='S').encode('latin1')
 
+def show_user_guide():
+    st.title("Panduan Pengguna ℹ️")
+    st.markdown("---")
+    st.markdown("""
+        Selamat datang di **Sistem Kontrol Stok & Penggajian PT. Berkat Karya Anugerah**.
+        Aplikasi ini dirancang untuk mempermudah manajemen inventaris dan penggajian Anda.
+
+        ### Akses Menu Berdasarkan Peran
+        * **Owner (Pemilik):** Memiliki akses penuh ke semua fitur aplikasi:
+            * Dashboard
+            * Master Barang
+            * Barang Masuk
+            * Transaksi Keluar
+            * Monitoring Stok
+            * Penggajian
+            * Panduan Pengguna
+        
+        * **Adm Kasir (Admin Kasir):** Fokus pada transaksi penjualan:
+            * Dashboard
+            * Transaksi Keluar (Penjualan)
+            * Monitoring Stok
+            * Panduan Pengguna
+        
+        * **Adm Gudang (Admin Gudang):** Bertanggung jawab atas inventaris:
+            * Dashboard
+            * Master Barang (Tambah, Edit, Hapus data barang)
+            * Barang Masuk (Catat barang masuk)
+            * Monitoring Stok
+            * Panduan Pengguna
+
+        ### Cara Menggunakan Aplikasi
+        1.  **Login:** Masuk dengan nama pengguna dan kata sandi yang telah diberikan.
+        2.  **Navigasi:** Gunakan menu di sisi kiri untuk berpindah antar halaman.
+        3.  **Input Data:** Gunakan formulir di setiap halaman untuk memasukkan data master barang, barang masuk, transaksi keluar, atau data penggajian.
+        4.  **Monitoring:** Halaman **Monitoring Stok** menyediakan laporan dan grafik untuk memantau inventaris secara real-time.
+        5.  **Cetak Dokumen:** Anda dapat mencetak Invoice atau Slip Gaji dalam format PDF langsung dari aplikasi.
+    """)
+
 def show_dashboard():
     st.title("Dashboard Bisnis 📈")
     st.markdown("---")
@@ -603,7 +644,7 @@ def show_dashboard():
                          x='label', 
                          y='Stok Saat Ini',
                          title='10 Item dengan Stok Terendah',
-                         labels={'label': 'Nama Item', 'Stok Saat Ini': 'Jumlah Stok'},
+                         labels={'label': 'Nama Bahan', 'Stok Saat Ini': 'Jumlah Stok'},
                          color='Stok Saat Ini',
                          color_continuous_scale=px.colors.sequential.Sunset
                          )
@@ -628,7 +669,7 @@ def show_master_barang():
                     nama_supplier = st.text_input("Nama Supplier")
                     warna = st.text_input("Warna").lower()
                 with col2:
-                    nama_bahan = st.text_input("Nama Item")
+                    nama_bahan = st.text_input("Nama Bahan")
                     rak = st.text_input("Rak")
                     harga = st.number_input("Harga", min_value=0.0)
                 
@@ -666,7 +707,7 @@ def show_master_barang():
                             col1, col2 = st.columns(2)
                             with col1:
                                 new_kode_bahan = st.text_input("Kode Bahan Baru", value=selected_row['kode_bahan']).upper()
-                                new_nama_bahan = st.text_input("Nama Item", value=selected_row['nama_bahan'])
+                                new_nama_bahan = st.text_input("Nama Bahan", value=selected_row['nama_bahan'])
                                 new_rak = st.text_input("Rak", value=selected_row['rak'])
                             with col2:
                                 new_warna = st.text_input("Warna Baru", value=selected_row['warna']).lower()
@@ -943,7 +984,7 @@ def show_transaksi_keluar_invoice_page():
                 st.write(f"**Nama Pelanggan:** {invoice_data['Nama Pelanggan']}")
                 st.write(f"**Tanggal:** {invoice_data['Tanggal & Waktu']}")
                 st.dataframe(invoice_items_df[['nama_bahan', 'qty', 'harga', 'total']].rename(columns={
-                    'nama_bahan': 'Nama Item',
+                    'nama_bahan': 'Nama Bahan',
                     'qty': 'Qty',
                     'harga': 'Harga',
                     'total': 'Total'
@@ -1201,10 +1242,12 @@ def login_page():
         password = st.text_input("Kata Sandi", type="password")
         submitted = st.form_submit_button("Login")
         if submitted:
-            if check_login(username, password):
+            success, role = check_login(username, password)
+            if success:
                 st.session_state['logged_in'] = True
+                st.session_state['role'] = role
                 st.session_state['page'] = 'Dashboard'
-                st.success("Berhasil Login! ✅")
+                st.success(f"Berhasil Login sebagai **{role.upper()}**! ✅")
                 st.rerun()
             else:
                 st.error("Nama pengguna atau kata sandi salah. ❌")
@@ -1221,47 +1264,59 @@ def main():
         if 'sheets_checked' not in st.session_state:
             check_and_create_worksheets()
             st.session_state['sheets_checked'] = True
+            
+        role = st.session_state['role']
 
-        if st.sidebar.button("Dashboard 📈", use_container_width=True):
-            st.session_state['page'] = "Dashboard"
-            st.rerun()
-        if st.sidebar.button("Master Barang 📦", use_container_width=True):
-            st.session_state['page'] = "Master Barang"
-            st.rerun()
-        if st.sidebar.button("Barang Masuk 📥", use_container_width=True):
-            st.session_state['page'] = "Barang Masuk"
-            st.rerun()
-        if st.sidebar.button("Transaksi Keluar 🧾", use_container_width=True):
-            st.session_state['page'] = "Transaksi Keluar"
-            st.rerun()
-        if st.sidebar.button("Monitoring Stok 📊", use_container_width=True):
-            st.session_state['page'] = "Monitoring Stok"
-            st.rerun()
-        if st.sidebar.button("Penggajian 💰", use_container_width=True):
-            st.session_state['page'] = "Penggajian"
-            st.rerun()
+        # Menu yang tersedia untuk setiap peran
+        if role == 'owner':
+            if st.sidebar.button("Dashboard 📈", use_container_width=True): st.session_state['page'] = "Dashboard"
+            if st.sidebar.button("Master Barang 📦", use_container_width=True): st.session_state['page'] = "Master Barang"
+            if st.sidebar.button("Barang Masuk 📥", use_container_width=True): st.session_state['page'] = "Barang Masuk"
+            if st.sidebar.button("Transaksi Keluar 🧾", use_container_width=True): st.session_state['page'] = "Transaksi Keluar"
+            if st.sidebar.button("Monitoring Stok 📊", use_container_width=True): st.session_state['page'] = "Monitoring Stok"
+            if st.sidebar.button("Penggajian 💰", use_container_width=True): st.session_state['page'] = "Penggajian"
+            if st.sidebar.button("Panduan Pengguna ℹ️", use_container_width=True): st.session_state['page'] = "Panduan Pengguna"
+        
+        elif role == 'adm kasir':
+            if st.sidebar.button("Dashboard 📈", use_container_width=True): st.session_state['page'] = "Dashboard"
+            if st.sidebar.button("Transaksi Keluar 🧾", use_container_width=True): st.session_state['page'] = "Transaksi Keluar"
+            if st.sidebar.button("Monitoring Stok 📊", use_container_width=True): st.session_state['page'] = "Monitoring Stok"
+            if st.sidebar.button("Panduan Pengguna ℹ️", use_container_width=True): st.session_state['page'] = "Panduan Pengguna"
+
+        elif role == 'adm gudang':
+            if st.sidebar.button("Dashboard 📈", use_container_width=True): st.session_state['page'] = "Dashboard"
+            if st.sidebar.button("Master Barang 📦", use_container_width=True): st.session_state['page'] = "Master Barang"
+            if st.sidebar.button("Barang Masuk 📥", use_container_width=True): st.session_state['page'] = "Barang Masuk"
+            if st.sidebar.button("Monitoring Stok 📊", use_container_width=True): st.session_state['page'] = "Monitoring Stok"
+            if st.sidebar.button("Panduan Pengguna ℹ️", use_container_width=True): st.session_state['page'] = "Panduan Pengguna"
         
         st.sidebar.markdown("---")
         if st.sidebar.button("Logout 🚪", use_container_width=True):
+            st.session_state.clear()
             st.session_state['logged_in'] = False
             st.session_state['page'] = 'Login'
             st.rerun()
         
+        # Perbarui pemanggilan fungsi berdasarkan peran
         if st.session_state['page'] == "Dashboard":
             show_dashboard()
-        elif st.session_state['page'] == "Master Barang":
+        elif st.session_state['page'] == "Master Barang" and role in ['owner', 'adm gudang']:
             show_master_barang()
-        elif st.session_state['page'] == "Barang Masuk":
+        elif st.session_state['page'] == "Barang Masuk" and role in ['owner', 'adm gudang']:
             show_input_masuk()
-        elif st.session_state['page'] == "Transaksi Keluar":
+        elif st.session_state['page'] == "Transaksi Keluar" and role in ['owner', 'adm kasir']:
             show_transaksi_keluar_invoice_page()
-        elif st.session_state['page'] == "Monitoring Stok":
+        elif st.session_state['page'] == "Monitoring Stok" and role in ['owner', 'adm kasir', 'adm gudang']:
             show_monitoring_stok()
-        elif st.session_state['page'] == "Penggajian":
+        elif st.session_state['page'] == "Penggajian" and role == 'owner':
             show_payroll_page()
+        elif st.session_state['page'] == "Panduan Pengguna" and role in ['owner', 'adm kasir', 'adm gudang']:
+            show_user_guide()
+        else:
+            # Fallback untuk memastikan halaman tidak kosong jika pengguna tidak memiliki akses
+            st.error("Anda tidak memiliki akses ke menu ini. Silakan pilih menu lain dari sidebar.")
     else:
         login_page()
 
 if __name__ == "__main__":
     main()
-

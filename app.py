@@ -520,7 +520,7 @@ def generate_payslips_pdf(payslip_df):
         # Pendapatan
         pdf.cell(60, 5, 'Gaji Pokok', 0, 0)
         pdf.cell(5, 5, ':', 0, 0)
-        pdf.cell(0, 5, f"Rp {row['gaji_pokok']:,.2f}", 0, 1, 'R')
+        pdf.cell(0, 5, f"Rp {row['gaji_pokok_x']:,.2f}", 0, 1, 'R')
         
         pdf.cell(60, 5, 'Lembur', 0, 0)
         pdf.cell(5, 5, ':', 0, 0)
@@ -1516,4 +1516,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

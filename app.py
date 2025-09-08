@@ -1184,8 +1184,8 @@ def show_transaksi_keluar_invoice_page():
         invoice_df = get_invoices()
         
         if not invoice_df.empty:
-            # Tambahkan kolom gabungan untuk pencarian
-            invoice_df['combined_search'] = invoice_df['invoice_number'] + " | " + invoice_df['tanggal_waktu'] + " | " + invoice_df['customer_name']
+            # Tambahkan kolom gabungan untuk pencarian dan tampilan
+            invoice_df['display_option'] = invoice_df['invoice_number'] + ' | ' + invoice_df['tanggal_waktu'] + ' | ' + invoice_df['customer_name']
             
             # Tambahkan input pencarian
             search_query = st.text_input("Cari Invoice (No. Invoice, Tanggal, atau Nama Pelanggan)", key="invoice_search_query")
@@ -1193,7 +1193,7 @@ def show_transaksi_keluar_invoice_page():
             # Filter DataFrame berdasarkan kueri pencarian
             if search_query:
                 filtered_invoices = invoice_df[
-                    invoice_df['combined_search'].str.contains(search_query, case=False, na=False)
+                    invoice_df['display_option'].str.contains(search_query, case=False, na=False)
                 ]
             else:
                 filtered_invoices = invoice_df
@@ -1203,18 +1203,21 @@ def show_transaksi_keluar_invoice_page():
             st.markdown("---")
             
             # Buat daftar opsi yang difilter untuk selectbox
-            invoice_options = filtered_invoices['invoice_number'].tolist()
+            invoice_options = filtered_invoices['display_option'].tolist()
             
             if not invoice_options:
                 st.info("Tidak ada invoice yang cocok dengan pencarian.")
             else:
-                selected_invoice_number = st.selectbox(
-                    "Pilih No Invoice untuk Dilihat/Unduh",
+                selected_combined_option = st.selectbox(
+                    "Pilih Invoice untuk Dilihat/Unduh",
                     options=invoice_options,
                     key="select_invoice_to_view"
                 )
                 
-                if selected_invoice_number:
+                if selected_combined_option:
+                    # Ekstrak nomor invoice dari string yang dipilih
+                    selected_invoice_number = selected_combined_option.split(' | ')[0]
+    
                     invoice_data = filtered_invoices[filtered_invoices['invoice_number'] == selected_invoice_number].iloc[0]
                     invoice_items = get_invoice_items(selected_invoice_number)
     
@@ -1560,6 +1563,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

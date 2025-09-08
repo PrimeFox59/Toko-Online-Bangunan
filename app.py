@@ -434,8 +434,25 @@ def delete_employee(nama):
 
 def add_payroll_record(employee_id, gaji_bulan, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan):
     tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    return append_row_to_gsheet('payroll', [tanggal_waktu, gaji_bulan, employee_id, gaji_pokok, lembur, lembur_minggu, uang_makan, pot_absen_finger, ijin_hr, simpanan_wajib, potongan_koperasi, kasbon, gaji_akhir, keterangan])
-
+    # Convert numerical inputs to float to ensure they are JSON serializable
+    data_list = [
+        tanggal_waktu,
+        gaji_bulan,
+        employee_id,
+        float(gaji_pokok),
+        float(lembur),
+        float(lembur_minggu),
+        float(uang_makan),
+        float(pot_absen_finger),
+        float(ijin_hr),
+        float(simpanan_wajib),
+        float(potongan_koperasi),
+        float(kasbon),
+        float(gaji_akhir),
+        keterangan
+    ]
+    return append_row_to_gsheet('payroll', data_list)
+    
 def get_payroll_records():
     df_payroll = get_data_from_gsheets('payroll')
     df_employees = get_employees()
@@ -1499,3 +1516,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -1180,39 +1180,65 @@ def show_transaksi_keluar_invoice_page():
                         st.error(message + " ❌")
                         
     with tab_history:
-        st.subheader("Riwayat Transaksi")
-        invoices_df = get_invoices()
-        if not invoices_df.empty:
-            invoices_df['tanggal_waktu'] = pd.to_datetime(invoices_df['tanggal_waktu']).dt.strftime('%Y-%m-%d %H:%M:%S')
-            invoices_df.rename(columns={'invoice_number': 'No Invoice', 'tanggal_waktu': 'Tanggal & Waktu', 'customer_name': 'Nama Pelanggan'}, inplace=True)
-            
-            st.dataframe(invoices_df, use_container_width=True, hide_index=True)
-            
-            selected_invoice = st.selectbox("Pilih No Invoice untuk Dilihat/Unduh", invoices_df['No Invoice'].tolist())
-            
-            if st.button("Tampilkan & Unduh Invoice"):
-                invoice_data = invoices_df[invoices_df['No Invoice'] == selected_invoice].iloc[0]
-                invoice_items_df = get_invoice_items(selected_invoice)
-
-                st.subheader(f"Detail Invoice: {selected_invoice}")
-                st.write(f"**Nama Pelanggan:** {invoice_data['Nama Pelanggan']}")
-                st.write(f"**Tanggal:** {invoice_data['Tanggal & Waktu']}")
-                st.dataframe(invoice_items_df[['nama_bahan', 'qty', 'harga', 'total']].rename(columns={
-                    'nama_bahan': 'Nama Item',
-                    'qty': 'Qty',
-                    'harga': 'Harga',
-                    'total': 'Total'
-                }), use_container_width=True, hide_index=True)
-
-                pdf_file = generate_invoice_pdf(invoice_data, invoice_items_df)
-                st.download_button(
-                    label="Unduh Invoice PDF 📥",
-                    data=pdf_file,
-                    file_name=f"invoice_{selected_invoice}.pdf",
-                    mime="application/pdf"
-                )
+    st.subheader("Riwayat Transaksi & Invoice")
+    invoice_df = get_invoices()
+    
+    if not invoice_df.empty:
+        # Tambahkan kolom gabungan untuk pencarian
+        invoice_df['combined_search'] = invoice_df['invoice_number'] + " | " + invoice_df['tanggal_waktu'] + " | " + invoice_df['customer_name']
+        
+        # Tambahkan input pencarian
+        search_query = st.text_input("Cari Invoice (No. Invoice, Tanggal, atau Nama Pelanggan)", key="invoice_search_query")
+        
+        # Filter DataFrame berdasarkan kueri pencarian
+        if search_query:
+            filtered_invoices = invoice_df[
+                invoice_df['combined_search'].str.contains(search_query, case=False, na=False)
+            ]
         else:
-            st.info("Belum ada riwayat transaksi.")
+            filtered_invoices = invoice_df
+            
+        st.dataframe(filtered_invoices[['invoice_number', 'tanggal_waktu', 'customer_name']], use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        
+        # Buat daftar opsi yang difilter untuk selectbox
+        invoice_options = filtered_invoices['invoice_number'].tolist()
+        
+        if not invoice_options:
+            st.info("Tidak ada invoice yang cocok dengan pencarian.")
+        else:
+            selected_invoice_number = st.selectbox(
+                "Pilih No Invoice untuk Dilihat/Unduh",
+                options=invoice_options,
+                key="select_invoice_to_view"
+            )
+            
+            if selected_invoice_number:
+                invoice_data = filtered_invoices[filtered_invoices['invoice_number'] == selected_invoice_number].iloc[0]
+                invoice_items = get_invoice_items(selected_invoice_number)
+
+                st.subheader(f"Detail Invoice: {selected_invoice_number}")
+                st.write(f"**Tanggal & Waktu:** {invoice_data['tanggal_waktu']}")
+                st.write(f"**Nama Pelanggan:** {invoice_data['customer_name']}")
+
+                st.dataframe(invoice_items, use_container_width=True, hide_index=True)
+
+                pdf_content = generate_invoice_pdf({
+                    'No Invoice': invoice_data['invoice_number'],
+                    'Tanggal & Waktu': invoice_data['tanggal_waktu'],
+                    'Nama Pelanggan': invoice_data['customer_name']
+                }, invoice_items)
+
+                st.download_button(
+                    label="Unduh PDF Invoice",
+                    data=pdf_content,
+                    file_name=f"invoice_{selected_invoice_number}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+    else:
+        st.info("Belum ada data transaksi keluar.")
 
 def show_monitoring_stok():
     st.title("Monitoring Stok 📊")
@@ -1534,6 +1560,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

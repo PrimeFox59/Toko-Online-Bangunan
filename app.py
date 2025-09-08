@@ -1117,9 +1117,8 @@ def show_transaksi_keluar_invoice_page():
                             current_qty = int(st.session_state.cart_items[i].get('qty', 0))
                             st.session_state.cart_items[i]['qty'] = st.number_input(
                                 "Jumlah",
-                                min_value=min_val,
-                                max_value=max_val,
-                                value=current_qty,
+                                value=st.session_state.cart_items[i]['qty'],
+                                min_value=0, # Ubah min_value dari 1 menjadi 0
                                 key=f"qty_{i}"
                             )
                         
@@ -1516,6 +1515,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

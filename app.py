@@ -592,7 +592,7 @@ def generate_payslips_pdf(payslip_df):
         pdf.ln(15)
         pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
 
-    return pdf.output(dest='S').encode('latin1')
+    return pdf.output(dest='S')
 
 def show_user_guide():
     st.title("Panduan Pengguna ℹ️")
@@ -1516,6 +1516,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

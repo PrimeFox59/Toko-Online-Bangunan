@@ -361,7 +361,7 @@ def generate_invoice_pdf(invoice_data, invoice_items):
     pdf.ln(10)
     pdf.cell(0, 5, "Ttd Accounting", 0, 1, 'R')
     
-    return pdf.output(dest='S').encode('latin1')
+    return io.BytesIO(pdf.output(dest='S'))
     
 def generate_invoice_number():
     df_invoices = get_invoices()
@@ -1515,6 +1515,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

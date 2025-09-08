@@ -535,7 +535,7 @@ def generate_payslips_pdf(payslip_df):
         pdf.cell(0, 5, f"Rp {row['uang_makan']:,.2f}", 0, 1, 'R')
 
         # Total 1
-        total1 = row['gaji_pokok'] + row['lembur'] + row['lembur_minggu'] + row['uang_makan']
+        total1 = row['gaji_pokok_x'] + row['lembur'] + row['lembur_minggu'] + row['uang_makan']
         pdf.set_font("Arial", 'B', 10)
         pdf.cell(60, 5, 'Total Pendapatan (1)', 'T', 0)
         pdf.cell(5, 5, ':', 'T', 0)
@@ -1516,5 +1516,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 

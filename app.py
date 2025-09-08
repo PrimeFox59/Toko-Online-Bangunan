@@ -946,12 +946,27 @@ def show_input_masuk():
             with st.form("input_masuk_form"):
                 col1, col2 = st.columns(2)
                 with col1:
+                    # Pilihan Kode Barang
                     kode_bahan_options = master_df['kode_bahan'].unique().tolist()
-                    selected_kode_bahan = st.selectbox("Pilih Kode barang", kode_bahan_options, key="in_kode_bahan")
-                
+                    kode_bahan_selected = st.selectbox(
+                        "Pilih Kode barang",
+                        options=kode_bahan_options,
+                        key="kode_masuk_select"
+                    )
+            
                 with col2:
-                    filtered_colors = master_df[master_df['kode_bahan'] == selected_kode_bahan]['warna'].tolist()
-                    selected_warna = st.selectbox("Warna", filtered_colors, key="in_warna")
+                    # PERBAIKAN: Filter warna berdasarkan kode_bahan yang dipilih
+                    filtered_colors = master_df[master_df['kode_bahan'] == kode_bahan_selected]['warna'].unique().tolist()
+                    if filtered_colors:
+                        warna_selected = st.selectbox(
+                            "Warna",
+                            options=filtered_colors,
+                            key="warna_masuk_select"
+                        )
+                    else:
+                        st.warning("Tidak ada warna yang tersedia untuk kode barang ini.")
+                        return
+
                 
                 stok = st.number_input("Stok", min_value=1, key="in_stok")
                 yard = st.number_input("Yard", min_value=0.0, key="in_yard")
@@ -1515,6 +1530,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

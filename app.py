@@ -942,48 +942,48 @@ def show_input_masuk():
     tab_add, tab_list = st.tabs(["➕ Input Barang Masuk Baru", "📝 Daftar Barang Masuk & Kelola"])
 
     with tab_add:
-    with st.expander("Form Input Barang Masuk", expanded=True):
-        master_df['display_option'] = master_df['kode_bahan'] + ' (' + master_df['warna'] + ')'
-        combined_options = master_df['display_option'].unique().tolist()
-        
-        with st.form("input_masuk_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                # Dropdown tunggal untuk Kode barang dan Warna
-                selected_combined = st.selectbox(
-                    "Pilih Kode Barang (Warna)",
-                    options=combined_options,
-                    key="combined_select"
-                )
-
-                # Ekstrak Kode bahan dan Warna dari string yang dipilih
-                kode_bahan_selected = None
-                warna_selected = None
-                if selected_combined:
-                    try:
-                        kode_bahan_selected = selected_combined.split(' ')[0]
-                        warna_selected = selected_combined.split('(')[1].replace(')', '')
-                    except IndexError:
-                        st.error("Format pilihan tidak valid. Periksa data master.")
-                
-                stok = st.number_input("Stok", min_value=1, key="in_stok")
-                
-            with col2:
-                yard = st.number_input("Yard", min_value=0.0, key="in_yard")
-                keterangan = st.text_area("Keterangan", key="in_keterangan")
+        with st.expander("Form Input Barang Masuk", expanded=True):
+            master_df['display_option'] = master_df['kode_bahan'] + ' (' + master_df['warna'] + ')'
+            combined_options = master_df['display_option'].unique().tolist()
             
-            submitted = st.form_submit_button("💾 Simpan Barang Masuk")
-            if submitted:
-                if kode_bahan_selected and warna_selected:
-                    tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    if add_barang_masuk(tanggal_waktu, kode_bahan_selected, warna_selected, stok, yard, keterangan):
-                        st.success("Barang masuk berhasil dicatat! ✅")
-                        st.cache_data.clear()
-                        st.rerun()
+            with st.form("input_masuk_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Dropdown tunggal untuk Kode barang dan Warna
+                    selected_combined = st.selectbox(
+                        "Pilih Kode Barang (Warna)",
+                        options=combined_options,
+                        key="combined_select"
+                    )
+    
+                    # Ekstrak Kode bahan dan Warna dari string yang dipilih
+                    kode_bahan_selected = None
+                    warna_selected = None
+                    if selected_combined:
+                        try:
+                            kode_bahan_selected = selected_combined.split(' ')[0]
+                            warna_selected = selected_combined.split('(')[1].replace(')', '')
+                        except IndexError:
+                            st.error("Format pilihan tidak valid. Periksa data master.")
+                    
+                    stok = st.number_input("Stok", min_value=1, key="in_stok")
+                    
+                with col2:
+                    yard = st.number_input("Yard", min_value=0.0, key="in_yard")
+                    keterangan = st.text_area("Keterangan", key="in_keterangan")
+                
+                submitted = st.form_submit_button("💾 Simpan Barang Masuk")
+                if submitted:
+                    if kode_bahan_selected and warna_selected:
+                        tanggal_waktu = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        if add_barang_masuk(tanggal_waktu, kode_bahan_selected, warna_selected, stok, yard, keterangan):
+                            st.success("Barang masuk berhasil dicatat! ✅")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error("Gagal mencatat barang masuk.")
                     else:
-                        st.error("Gagal mencatat barang masuk.")
-                else:
-                    st.error("Pilihan kode barang tidak valid.")
+                        st.error("Pilihan kode barang tidak valid.")
     
     with tab_list:
         st.subheader("Daftar Barang Masuk")
@@ -1534,6 +1534,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

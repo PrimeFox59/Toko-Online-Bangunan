@@ -1530,6 +1530,7 @@ def main():
             if st.sidebar.button("Dashboard 📈", use_container_width=True): st.session_state['page'] = "Dashboard"
             if st.sidebar.button("Master Barang 📦", use_container_width=True): st.session_state['page'] = "Master Barang"
             if st.sidebar.button("Barang Masuk 📥", use_container_width=True): st.session_state['page'] = "Barang Masuk"
+            if st.sidebar.button("Transaksi Keluar 🧾", use_container_width=True): st.session_state['page'] = "Transaksi Keluar"
             if st.sidebar.button("Monitoring Stok 📊", use_container_width=True): st.session_state['page'] = "Monitoring Stok"
             if st.sidebar.button("Panduan Pengguna ℹ️", use_container_width=True): st.session_state['page'] = "Panduan Pengguna"
         
@@ -1563,6 +1564,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

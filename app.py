@@ -1548,7 +1548,7 @@ def main():
             show_master_barang()
         elif st.session_state['page'] == "Barang Masuk" and role in ['owner', 'adm gudang']:
             show_input_masuk()
-        elif st.session_state['page'] == "Transaksi Keluar" and role in ['owner', 'adm kasir']:
+        elif st.session_state['page'] == "Transaksi Keluar" and role in ['owner', 'adm kasir', 'adm gudang']:
             show_transaksi_keluar_invoice_page()
         elif st.session_state['page'] == "Monitoring Stok" and role in ['owner', 'adm kasir', 'adm gudang']:
             show_monitoring_stok()
@@ -1564,6 +1564,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

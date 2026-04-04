@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime
 from fpdf import FPDF
 import io
+import os
+import tempfile
 import bcrypt
 import plotly.express as px
 import gspread
@@ -531,6 +533,244 @@ def add_barang_keluar_and_invoice(invoice_number, customer_name, items):
             return False, "Gagal mencatat barang keluar."
     
     return True, "Transaksi berhasil dicatat dan invoice dibuat."
+
+def get_sales_report_data_by_period(year, month):
+    """Mengambil data penjualan bulanan untuk kebutuhan laporan PDF."""
+    invoices_df = get_invoices()
+    invoice_items_df = get_data_from_gsheets('invoice_items')
+
+    if invoices_df.empty:
+        return {
+            'metrics': {
+                'total_omzet': 0.0,
+                'jumlah_transaksi': 0,
+                'total_item_terjual': 0.0,
+                'rata_nilai_transaksi': 0.0
+            },
+            'transactions': pd.DataFrame(),
+            'title_month': f"{month:02d}-{year}"
+        }
+
+    invoices_df['tanggal_waktu'] = pd.to_datetime(invoices_df['tanggal_waktu'], errors='coerce')
+    period_df = invoices_df[
+        (invoices_df['tanggal_waktu'].dt.year == year) &
+        (invoices_df['tanggal_waktu'].dt.month == month)
+    ].copy()
+
+    if period_df.empty:
+        return {
+            'metrics': {
+                'total_omzet': 0.0,
+                'jumlah_transaksi': 0,
+                'total_item_terjual': 0.0,
+                'rata_nilai_transaksi': 0.0
+            },
+            'transactions': pd.DataFrame(),
+            'title_month': f"{month:02d}-{year}"
+        }
+
+    if invoice_items_df.empty:
+        period_df['total_invoice'] = 0.0
+        period_df['total_qty'] = 0.0
+    else:
+        invoice_items_df['qty'] = pd.to_numeric(invoice_items_df['qty'], errors='coerce').fillna(0)
+        invoice_items_df['total'] = pd.to_numeric(invoice_items_df['total'], errors='coerce').fillna(0)
+
+        invoice_totals = invoice_items_df.groupby('invoice_number', as_index=False).agg(
+            total_invoice=('total', 'sum'),
+            total_qty=('qty', 'sum')
+        )
+        period_df = period_df.merge(invoice_totals, on='invoice_number', how='left')
+        period_df['total_invoice'] = pd.to_numeric(period_df['total_invoice'], errors='coerce').fillna(0)
+        period_df['total_qty'] = pd.to_numeric(period_df['total_qty'], errors='coerce').fillna(0)
+
+    total_omzet = float(period_df['total_invoice'].sum())
+    jumlah_transaksi = int(period_df['invoice_number'].nunique())
+    total_item_terjual = float(period_df['total_qty'].sum())
+    rata_nilai_transaksi = float(total_omzet / jumlah_transaksi) if jumlah_transaksi > 0 else 0.0
+
+    transactions_df = period_df[['invoice_number', 'tanggal_waktu', 'customer_name', 'total_qty', 'total_invoice']].copy()
+    transactions_df = transactions_df.sort_values(by='tanggal_waktu', ascending=True)
+    transactions_df['tanggal_waktu'] = transactions_df['tanggal_waktu'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    month_map = {
+        1: 'Januari', 2: 'Februari', 3: 'Maret', 4: 'April', 5: 'Mei', 6: 'Juni',
+        7: 'Juli', 8: 'Agustus', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Desember'
+    }
+
+    return {
+        'metrics': {
+            'total_omzet': total_omzet,
+            'jumlah_transaksi': jumlah_transaksi,
+            'total_item_terjual': total_item_terjual,
+            'rata_nilai_transaksi': rata_nilai_transaksi
+        },
+        'transactions': transactions_df,
+        'title_month': f"{month_map.get(month, str(month))} {year}"
+    }
+
+def build_kpi_target_vs_realization_df(metrics, targets):
+    """Menyusun tabel KPI target vs realisasi untuk ditampilkan dan diekspor ke PDF."""
+    rows = [
+        ('Total Omzet (Rp)', float(targets.get('total_omzet', 0)), float(metrics.get('total_omzet', 0))),
+        ('Jumlah Transaksi', float(targets.get('jumlah_transaksi', 0)), float(metrics.get('jumlah_transaksi', 0))),
+        ('Total Item Terjual', float(targets.get('total_item_terjual', 0)), float(metrics.get('total_item_terjual', 0))),
+        ('Rata-rata Nilai Transaksi (Rp)', float(targets.get('rata_nilai_transaksi', 0)), float(metrics.get('rata_nilai_transaksi', 0)))
+    ]
+
+    table_data = []
+    for nama, target, realisasi in rows:
+        capaian = (realisasi / target * 100) if target > 0 else 0
+        status = 'Tercapai' if realisasi >= target and target > 0 else 'Belum Tercapai'
+        table_data.append({
+            'KPI': nama,
+            'Target': target,
+            'Realisasi': realisasi,
+            'Capaian (%)': capaian,
+            'Status': status
+        })
+
+    return pd.DataFrame(table_data)
+
+def generate_sales_report_pdf(report_data, logo_bytes=None):
+    """Membuat laporan penjualan bulanan PDF portrait dengan struktur manajemen lengkap."""
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.set_auto_page_break(auto=True, margin=12)
+
+    def add_title(title):
+        pdf.set_font("Arial", 'B', 14)
+        pdf.set_text_color(60, 20, 45)
+        pdf.multi_cell(0, 8, title)
+        pdf.ln(2)
+
+    def add_paragraph(text, line_height=7):
+        pdf.set_font("Arial", '', 11)
+        pdf.set_text_color(40, 40, 40)
+        content = text.strip() if text else "-"
+        pdf.multi_cell(0, line_height, content)
+        pdf.ln(1)
+
+    # 1) Halaman Sampul
+    pdf.add_page()
+    logo_path = None
+    try:
+        if logo_bytes:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_logo:
+                tmp_logo.write(logo_bytes)
+                logo_path = tmp_logo.name
+            pdf.image(logo_path, x=80, y=22, w=50)
+        else:
+            pdf.set_draw_color(180, 180, 180)
+            pdf.rect(80, 22, 50, 35)
+            pdf.set_xy(80, 38)
+            pdf.set_font("Arial", 'I', 10)
+            pdf.cell(50, 6, 'Logo Perusahaan', align='C')
+
+        pdf.set_y(72)
+        pdf.set_font("Arial", 'B', 22)
+        pdf.set_text_color(80, 25, 55)
+        pdf.multi_cell(0, 11, report_data['cover_title'], align='C')
+        pdf.ln(8)
+
+        pdf.set_font("Arial", '', 12)
+        pdf.set_text_color(70, 70, 70)
+        pdf.cell(0, 8, f"Nama Penyusun: {report_data['author_name']}", ln=1, align='C')
+        pdf.cell(0, 8, f"Tanggal: {report_data['report_date']}", ln=1, align='C')
+    finally:
+        if logo_path and os.path.exists(logo_path):
+            os.remove(logo_path)
+
+    # 2) Ringkasan Eksekutif / Pendahuluan
+    pdf.add_page()
+    add_title('Ringkasan Eksekutif / Pendahuluan')
+    summary_text = (
+        f"Kinerja utama periode ini mencatat omzet Rp {report_data['metrics']['total_omzet']:,.2f} "
+        f"dengan {report_data['metrics']['jumlah_transaksi']} transaksi dan "
+        f"{report_data['metrics']['total_item_terjual']:,.0f} item terjual. "
+        f"Rata-rata nilai transaksi berada di Rp {report_data['metrics']['rata_nilai_transaksi']:,.2f}."
+    )
+    add_paragraph(summary_text)
+    add_paragraph(f"Highlight Pencapaian Terbesar: {report_data['highlight']}")
+    add_paragraph(f"Isu Krusial: {report_data['critical_issue']}")
+
+    # 3) Capaian Kinerja (KPI/Matrik)
+    pdf.add_page()
+    add_title('Capaian Kinerja (KPI / Matrik)')
+    add_paragraph('Perbandingan target vs realisasi:')
+
+    kpi_df = report_data['kpi_table']
+    col_widths = [62, 30, 30, 30, 38]
+    headers = ['KPI', 'Target', 'Realisasi', 'Capaian %', 'Status']
+
+    pdf.set_fill_color(230, 230, 230)
+    pdf.set_font("Arial", 'B', 10)
+    for idx, header in enumerate(headers):
+        pdf.cell(col_widths[idx], 8, header, border=1, align='C', fill=True)
+    pdf.ln()
+
+    pdf.set_font("Arial", '', 9)
+    for _, row in kpi_df.iterrows():
+        target_text = f"{row['Target']:,.2f}" if 'Rp' in row['KPI'] else f"{row['Target']:,.0f}"
+        realisasi_text = f"{row['Realisasi']:,.2f}" if 'Rp' in row['KPI'] else f"{row['Realisasi']:,.0f}"
+        capaian_text = f"{row['Capaian (%)']:.1f}%"
+        pdf.cell(col_widths[0], 8, str(row['KPI'])[:34], border=1)
+        pdf.cell(col_widths[1], 8, target_text, border=1, align='R')
+        pdf.cell(col_widths[2], 8, realisasi_text, border=1, align='R')
+        pdf.cell(col_widths[3], 8, capaian_text, border=1, align='R')
+        pdf.cell(col_widths[4], 8, str(row['Status']), border=1, align='C')
+        pdf.ln()
+
+    # 4) Analisis Aktivitas & Pencapaian
+    pdf.add_page()
+    add_title('Analisis Aktivitas & Pencapaian')
+    add_paragraph(report_data['activity_analysis'])
+
+    # 5) Masalah dan Solusi
+    pdf.add_page()
+    add_title('Masalah dan Solusi')
+    add_paragraph(report_data['problem_and_solution'])
+
+    # 6) Rencana Tindak Lanjut (Bulan Depan)
+    pdf.add_page()
+    add_title('Rencana Tindak Lanjut (Bulan Depan)')
+    add_paragraph(report_data['next_plan'])
+
+    # 7) Lampiran / Dokumentasi
+    pdf.add_page()
+    add_title('Lampiran / Dokumentasi')
+    add_paragraph(report_data['appendix_notes'])
+    add_paragraph('Ringkasan transaksi pendukung:')
+
+    trx_df = report_data['transactions'].copy()
+    if trx_df.empty:
+        add_paragraph('Tidak ada data transaksi pada periode ini.')
+    else:
+        table_widths = [36, 43, 49, 22, 40]
+        table_headers = ['Invoice', 'Tanggal', 'Pelanggan', 'Qty', 'Total (Rp)']
+        pdf.set_fill_color(230, 230, 230)
+        pdf.set_font("Arial", 'B', 9)
+        for idx, head in enumerate(table_headers):
+            pdf.cell(table_widths[idx], 7, head, border=1, align='C', fill=True)
+        pdf.ln()
+
+        pdf.set_font("Arial", '', 8)
+        for _, row in trx_df.head(40).iterrows():
+            if pdf.get_y() > 270:
+                pdf.add_page()
+            invoice_text = str(row['invoice_number'])[:18]
+            tanggal_text = str(row['tanggal_waktu'])[:19]
+            customer_text = str(row['customer_name'])[:22]
+            qty_text = f"{float(row['total_qty']):,.0f}"
+            total_text = f"{float(row['total_invoice']):,.2f}"
+
+            pdf.cell(table_widths[0], 7, invoice_text, border=1)
+            pdf.cell(table_widths[1], 7, tanggal_text, border=1)
+            pdf.cell(table_widths[2], 7, customer_text, border=1)
+            pdf.cell(table_widths[3], 7, qty_text, border=1, align='R')
+            pdf.cell(table_widths[4], 7, total_text, border=1, align='R')
+            pdf.ln()
+
+    return io.BytesIO(pdf.output(dest='S'))
 
 # --- Payroll Functions ---
 def add_employee(nama, bagian, gaji):
@@ -1368,6 +1608,121 @@ def show_transaksi_keluar_invoice_page():
                         mime="application/pdf",
                         use_container_width=True
                     )
+
+            st.markdown("---")
+            with st.expander("📘 Generate Laporan Penjualan Bulanan (PDF)", expanded=False):
+                st.caption("Format laporan: Sampul, Ringkasan, KPI target vs realisasi, Analisis, Masalah-Solusi, Rencana Bulan Depan, dan Lampiran.")
+
+                invoice_df_report = invoice_df.copy()
+                invoice_df_report['tanggal_waktu'] = pd.to_datetime(invoice_df_report['tanggal_waktu'], errors='coerce')
+                available_periods = (
+                    invoice_df_report.dropna(subset=['tanggal_waktu'])['tanggal_waktu']
+                    .dt.to_period('M')
+                    .drop_duplicates()
+                    .sort_values(ascending=False)
+                    .astype(str)
+                    .tolist()
+                )
+
+                if not available_periods:
+                    st.info("Belum ada periode transaksi yang dapat dibuatkan laporan.")
+                else:
+                    selected_period = st.selectbox("Pilih Periode Laporan", available_periods, key="sales_report_period")
+                    selected_year = int(selected_period.split('-')[0])
+                    selected_month = int(selected_period.split('-')[1])
+
+                    report_base = get_sales_report_data_by_period(selected_year, selected_month)
+                    metrics = report_base['metrics']
+
+                    st.markdown("### Target KPI")
+                    col_kpi1, col_kpi2 = st.columns(2)
+                    with col_kpi1:
+                        target_omzet = st.number_input("Target Total Omzet (Rp)", min_value=0.0, value=float(metrics['total_omzet']), key="target_omzet")
+                        target_transaksi = st.number_input("Target Jumlah Transaksi", min_value=0.0, value=float(metrics['jumlah_transaksi']), key="target_transaksi")
+                    with col_kpi2:
+                        target_item = st.number_input("Target Total Item Terjual", min_value=0.0, value=float(metrics['total_item_terjual']), key="target_item")
+                        target_avg = st.number_input("Target Rata-rata Nilai Transaksi (Rp)", min_value=0.0, value=float(metrics['rata_nilai_transaksi']), key="target_avg")
+
+                    targets = {
+                        'total_omzet': target_omzet,
+                        'jumlah_transaksi': target_transaksi,
+                        'total_item_terjual': target_item,
+                        'rata_nilai_transaksi': target_avg
+                    }
+                    kpi_table = build_kpi_target_vs_realization_df(metrics, targets)
+                    st.dataframe(kpi_table, use_container_width=True, hide_index=True)
+
+                    st.markdown("### Informasi Dokumen")
+                    col_doc1, col_doc2 = st.columns(2)
+                    with col_doc1:
+                        author_name = st.text_input("Nama Penyusun", value="Admin Penjualan", key="report_author")
+                    with col_doc2:
+                        report_date = st.date_input("Tanggal Laporan", value=datetime.now().date(), key="report_date")
+
+                    logo_file = st.file_uploader("Upload Logo Perusahaan (opsional)", type=['png', 'jpg', 'jpeg'], key="report_logo")
+
+                    st.markdown("### Isi Laporan")
+                    cover_title = st.text_input(
+                        "Judul Sampul",
+                        value=f"Laporan Bulanan {report_base['title_month']}",
+                        key="cover_title"
+                    )
+                    highlight = st.text_area(
+                        "Highlight Pencapaian Terbesar",
+                        value="Peningkatan omzet dan efisiensi proses penjualan dibanding bulan sebelumnya.",
+                        key="report_highlight"
+                    )
+                    critical_issue = st.text_area(
+                        "Isu Krusial",
+                        value="Ketersediaan stok item fast moving perlu penguatan agar tidak terjadi stockout.",
+                        key="report_issue"
+                    )
+                    activity_analysis = st.text_area(
+                        "Analisis Aktivitas & Pencapaian",
+                        value="Tim penjualan menjalankan promosi berkala, mempercepat proses invoicing, serta menjaga akurasi pencatatan transaksi.",
+                        key="report_activity"
+                    )
+                    problem_solution = st.text_area(
+                        "Masalah dan Solusi",
+                        value="Kendala utama: keterlambatan restock pada beberapa item. Solusi: penguatan monitoring stok minimum dan koordinasi supplier mingguan.",
+                        key="report_solution"
+                    )
+                    next_plan = st.text_area(
+                        "Rencana Tindak Lanjut (Bulan Depan)",
+                        value="Meningkatkan target penjualan, memperluas jangkauan pelanggan, dan menambah kontrol stok berbasis prioritas produk.",
+                        key="report_next_plan"
+                    )
+                    appendix_notes = st.text_area(
+                        "Lampiran / Dokumentasi",
+                        value="Lampiran berisi ringkasan invoice bulanan, rincian total item, serta catatan pendukung operasional.",
+                        key="report_appendix"
+                    )
+
+                    if st.button("Generate & Unduh Laporan Penjualan PDF", use_container_width=True):
+                        report_payload = {
+                            'cover_title': cover_title,
+                            'author_name': author_name,
+                            'report_date': report_date.strftime('%d %B %Y'),
+                            'highlight': highlight,
+                            'critical_issue': critical_issue,
+                            'activity_analysis': activity_analysis,
+                            'problem_and_solution': problem_solution,
+                            'next_plan': next_plan,
+                            'appendix_notes': appendix_notes,
+                            'metrics': metrics,
+                            'kpi_table': kpi_table,
+                            'transactions': report_base['transactions']
+                        }
+
+                        logo_bytes = logo_file.getvalue() if logo_file else None
+                        pdf_report = generate_sales_report_pdf(report_payload, logo_bytes=logo_bytes)
+                        st.download_button(
+                            label="Unduh Laporan Penjualan (PDF)",
+                            data=pdf_report,
+                            file_name=f"laporan_penjualan_{selected_period}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
         else:
             st.info("Belum ada data transaksi keluar.")
 

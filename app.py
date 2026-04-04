@@ -652,7 +652,10 @@ def get_sales_report_data_by_period(year, month):
                 'rata_nilai_transaksi': 0.0
             },
             'transactions': pd.DataFrame(),
-            'title_month': f"{month:02d}-{year}"
+            'title_month': f"{month:02d}-{year}",
+            'top_customer': {'name': '-', 'value': 0.0},
+            'top_item': {'name': '-', 'qty': 0.0},
+            'peak_day': {'date': '-', 'transactions': 0}
         }
 
     invoices_df['tanggal_waktu'] = pd.to_datetime(invoices_df['tanggal_waktu'], errors='coerce')
@@ -670,7 +673,10 @@ def get_sales_report_data_by_period(year, month):
                 'rata_nilai_transaksi': 0.0
             },
             'transactions': pd.DataFrame(),
-            'title_month': f"{month:02d}-{year}"
+            'title_month': f"{month:02d}-{year}",
+            'top_customer': {'name': '-', 'value': 0.0},
+            'top_item': {'name': '-', 'qty': 0.0},
+            'peak_day': {'date': '-', 'transactions': 0}
         }
 
     if invoice_items_df.empty:
@@ -697,6 +703,39 @@ def get_sales_report_data_by_period(year, month):
     transactions_df = transactions_df.sort_values(by='tanggal_waktu', ascending=True)
     transactions_df['tanggal_waktu'] = transactions_df['tanggal_waktu'].dt.strftime('%Y-%m-%d %H:%M:%S')
 
+    top_customer = {'name': '-', 'value': 0.0}
+    customer_agg = period_df.groupby('customer_name', as_index=False)['total_invoice'].sum()
+    if not customer_agg.empty:
+        customer_top_row = customer_agg.sort_values('total_invoice', ascending=False).iloc[0]
+        top_customer = {
+            'name': str(customer_top_row['customer_name']),
+            'value': float(customer_top_row['total_invoice'])
+        }
+
+    top_item = {'name': '-', 'qty': 0.0}
+    period_invoice_numbers = period_df['invoice_number'].tolist()
+    if not invoice_items_df.empty and period_invoice_numbers:
+        period_items = invoice_items_df[invoice_items_df['invoice_number'].isin(period_invoice_numbers)].copy()
+        if not period_items.empty:
+            item_agg = period_items.groupby('nama_bahan', as_index=False)['qty'].sum()
+            if not item_agg.empty:
+                item_top_row = item_agg.sort_values('qty', ascending=False).iloc[0]
+                top_item = {
+                    'name': str(item_top_row['nama_bahan']),
+                    'qty': float(item_top_row['qty'])
+                }
+
+    peak_day = {'date': '-', 'transactions': 0}
+    daily_trx = period_df.copy()
+    daily_trx['trx_date'] = daily_trx['tanggal_waktu'].dt.strftime('%Y-%m-%d')
+    daily_count = daily_trx.groupby('trx_date', as_index=False)['invoice_number'].count()
+    if not daily_count.empty:
+        peak_row = daily_count.sort_values('invoice_number', ascending=False).iloc[0]
+        peak_day = {
+            'date': str(peak_row['trx_date']),
+            'transactions': int(peak_row['invoice_number'])
+        }
+
     month_map = {
         1: 'Januari', 2: 'Februari', 3: 'Maret', 4: 'April', 5: 'Mei', 6: 'Juni',
         7: 'Juli', 8: 'Agustus', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Desember'
@@ -710,7 +749,26 @@ def get_sales_report_data_by_period(year, month):
             'rata_nilai_transaksi': rata_nilai_transaksi
         },
         'transactions': transactions_df,
-        'title_month': f"{month_map.get(month, str(month))} {year}"
+        'title_month': f"{month_map.get(month, str(month))} {year}",
+        'top_customer': top_customer,
+        'top_item': top_item,
+        'peak_day': peak_day
+    }
+
+def build_auto_kpi_targets(metrics, prev_metrics=None):
+    """Membangun target KPI otomatis berbasis histori bulan sebelumnya (jika ada)."""
+    prev_metrics = prev_metrics or {}
+
+    def auto_target(curr, prev, growth):
+        if prev and prev > 0:
+            return float(prev * (1 + growth))
+        return float(curr)
+
+    return {
+        'total_omzet': auto_target(metrics.get('total_omzet', 0), prev_metrics.get('total_omzet', 0), 0.10),
+        'jumlah_transaksi': auto_target(metrics.get('jumlah_transaksi', 0), prev_metrics.get('jumlah_transaksi', 0), 0.08),
+        'total_item_terjual': auto_target(metrics.get('total_item_terjual', 0), prev_metrics.get('total_item_terjual', 0), 0.08),
+        'rata_nilai_transaksi': auto_target(metrics.get('rata_nilai_transaksi', 0), prev_metrics.get('rata_nilai_transaksi', 0), 0.05)
     }
 
 def build_kpi_target_vs_realization_df(metrics, targets):
@@ -735,6 +793,73 @@ def build_kpi_target_vs_realization_df(metrics, targets):
         })
 
     return pd.DataFrame(table_data)
+
+def generate_system_sales_narrative(current_report, previous_report=None):
+    """Menyusun narasi laporan otomatis berdasarkan data transaksi penjualan."""
+    metrics = current_report.get('metrics', {})
+    prev_metrics = (previous_report or {}).get('metrics', {})
+
+    omzet_now = float(metrics.get('total_omzet', 0))
+    omzet_prev = float(prev_metrics.get('total_omzet', 0))
+    trx_now = int(metrics.get('jumlah_transaksi', 0))
+
+    if omzet_prev > 0:
+        growth_pct = ((omzet_now - omzet_prev) / omzet_prev) * 100
+    else:
+        growth_pct = 0
+
+    growth_label = "meningkat" if growth_pct >= 0 else "menurun"
+
+    top_customer = current_report.get('top_customer', {'name': '-', 'value': 0})
+    top_item = current_report.get('top_item', {'name': '-', 'qty': 0})
+    peak_day = current_report.get('peak_day', {'date': '-', 'transactions': 0})
+
+    highlight = (
+        f"Kontributor penjualan terbesar berasal dari pelanggan {top_customer.get('name', '-')}, "
+        f"dengan nilai transaksi sekitar Rp {float(top_customer.get('value', 0)):,.2f}. "
+        f"Produk paling dominan adalah {top_item.get('name', '-')} "
+        f"dengan total penjualan {float(top_item.get('qty', 0)):,.0f} unit."
+    )
+
+    if trx_now <= 5:
+        critical_issue = "Volume transaksi bulanan masih rendah sehingga risiko ketidakstabilan omzet relatif tinggi."
+    elif growth_pct < 0:
+        critical_issue = "Terjadi penurunan omzet dibanding bulan lalu, perlu evaluasi strategi akuisisi dan retensi pelanggan."
+    else:
+        critical_issue = "Konsistensi ketersediaan stok item cepat laku perlu dijaga agar momentum pertumbuhan tetap terjaga."
+
+    activity_analysis = (
+        f"Selama periode {current_report.get('title_month', '-')}, sistem mencatat {trx_now} transaksi "
+        f"dengan total omzet Rp {omzet_now:,.2f}. Aktivitas penjualan {growth_label} "
+        f"{abs(growth_pct):.2f}% dibanding periode sebelumnya. Puncak aktivitas transaksi terjadi pada "
+        f"{peak_day.get('date', '-')} dengan {int(peak_day.get('transactions', 0))} transaksi."
+    )
+
+    problem_solution = (
+        "Hambatan utama berasal dari potensi mismatch antara permintaan dan kesiapan stok produk utama. "
+        "Tindakan perbaikan yang dijalankan: monitoring stok minimum harian, validasi cepat item fast-moving, "
+        "dan sinkronisasi kebutuhan restock dengan pemasok secara berkala."
+    )
+
+    next_plan = (
+        "Fokus bulan depan adalah meningkatkan omzet melalui penguatan pelanggan aktif, mempercepat siklus penawaran, "
+        "dan menjaga rasio konversi transaksi. Strategi tambahan mencakup penetapan target mingguan per tim serta "
+        "prioritas promosi untuk produk dengan margin terbaik."
+    )
+
+    appendix_notes = (
+        "Lampiran berisi ringkasan invoice bulanan, data pelanggan dengan kontribusi omzet tertinggi, "
+        "serta rekap item terlaris untuk mendukung evaluasi operasional dan keputusan bisnis berikutnya."
+    )
+
+    return {
+        'highlight': highlight,
+        'critical_issue': critical_issue,
+        'activity_analysis': activity_analysis,
+        'problem_and_solution': problem_solution,
+        'next_plan': next_plan,
+        'appendix_notes': appendix_notes
+    }
 
 def generate_sales_report_pdf(report_data, logo_bytes=None):
     """Membuat laporan penjualan bulanan PDF portrait dengan struktur manajemen lengkap."""
@@ -1715,7 +1840,7 @@ def show_transaksi_keluar_invoice_page():
 
             st.markdown("---")
             with st.expander("📘 Generate Laporan Penjualan Bulanan (PDF)", expanded=False):
-                st.caption("Format laporan: Sampul, Ringkasan, KPI target vs realisasi, Analisis, Masalah-Solusi, Rencana Bulan Depan, dan Lampiran.")
+                st.caption("Laporan disusun otomatis oleh sistem berdasarkan data transaksi. User hanya memilih periode laporan.")
 
                 invoice_df_report = invoice_df.copy()
                 invoice_df_report['tanggal_waktu'] = pd.to_datetime(invoice_df_report['tanggal_waktu'], errors='coerce')
@@ -1738,81 +1863,46 @@ def show_transaksi_keluar_invoice_page():
                     report_base = get_sales_report_data_by_period(selected_year, selected_month)
                     metrics = report_base['metrics']
 
-                    st.markdown("### Target KPI")
-                    col_kpi1, col_kpi2 = st.columns(2)
-                    with col_kpi1:
-                        target_omzet = st.number_input("Target Total Omzet (Rp)", min_value=0.0, value=float(metrics['total_omzet']), key="target_omzet")
-                        target_transaksi = st.number_input("Target Jumlah Transaksi", min_value=0.0, value=float(metrics['jumlah_transaksi']), key="target_transaksi")
-                    with col_kpi2:
-                        target_item = st.number_input("Target Total Item Terjual", min_value=0.0, value=float(metrics['total_item_terjual']), key="target_item")
-                        target_avg = st.number_input("Target Rata-rata Nilai Transaksi (Rp)", min_value=0.0, value=float(metrics['rata_nilai_transaksi']), key="target_avg")
+                    selected_period_obj = pd.Period(selected_period, freq='M')
+                    prev_period_obj = selected_period_obj - 1
+                    prev_report_base = get_sales_report_data_by_period(prev_period_obj.year, prev_period_obj.month)
 
-                    targets = {
-                        'total_omzet': target_omzet,
-                        'jumlah_transaksi': target_transaksi,
-                        'total_item_terjual': target_item,
-                        'rata_nilai_transaksi': target_avg
-                    }
+                    targets = build_auto_kpi_targets(metrics, prev_report_base.get('metrics', {}))
                     kpi_table = build_kpi_target_vs_realization_df(metrics, targets)
-                    st.dataframe(kpi_table, use_container_width=True, hide_index=True)
 
-                    st.markdown("### Informasi Dokumen")
-                    col_doc1, col_doc2 = st.columns(2)
-                    with col_doc1:
-                        author_name = st.text_input("Nama Penyusun", value="Admin Penjualan", key="report_author")
-                    with col_doc2:
-                        report_date = st.date_input("Tanggal Laporan", value=datetime.now().date(), key="report_date")
+                    auto_narrative = generate_system_sales_narrative(report_base, prev_report_base)
+
+                    st.markdown("### Ringkasan Otomatis")
+                    st.info(
+                        f"Omzet: Rp {metrics['total_omzet']:,.2f} | "
+                        f"Transaksi: {metrics['jumlah_transaksi']} | "
+                        f"Item Terjual: {metrics['total_item_terjual']:,.0f}"
+                    )
+
+                    st.markdown("### KPI Otomatis (Target vs Realisasi)")
+                    st.dataframe(kpi_table, use_container_width=True, hide_index=True)
 
                     logo_file = st.file_uploader("Upload Logo Perusahaan (opsional)", type=['png', 'jpg', 'jpeg'], key="report_logo")
 
-                    st.markdown("### Isi Laporan")
-                    cover_title = st.text_input(
-                        "Judul Sampul",
-                        value=f"Laporan Bulanan {report_base['title_month']}",
-                        key="cover_title"
-                    )
-                    highlight = st.text_area(
-                        "Highlight Pencapaian Terbesar",
-                        value="Peningkatan omzet dan efisiensi proses penjualan dibanding bulan sebelumnya.",
-                        key="report_highlight"
-                    )
-                    critical_issue = st.text_area(
-                        "Isu Krusial",
-                        value="Ketersediaan stok item fast moving perlu penguatan agar tidak terjadi stockout.",
-                        key="report_issue"
-                    )
-                    activity_analysis = st.text_area(
-                        "Analisis Aktivitas & Pencapaian",
-                        value="Tim penjualan menjalankan promosi berkala, mempercepat proses invoicing, serta menjaga akurasi pencatatan transaksi.",
-                        key="report_activity"
-                    )
-                    problem_solution = st.text_area(
-                        "Masalah dan Solusi",
-                        value="Kendala utama: keterlambatan restock pada beberapa item. Solusi: penguatan monitoring stok minimum dan koordinasi supplier mingguan.",
-                        key="report_solution"
-                    )
-                    next_plan = st.text_area(
-                        "Rencana Tindak Lanjut (Bulan Depan)",
-                        value="Meningkatkan target penjualan, memperluas jangkauan pelanggan, dan menambah kontrol stok berbasis prioritas produk.",
-                        key="report_next_plan"
-                    )
-                    appendix_notes = st.text_area(
-                        "Lampiran / Dokumentasi",
-                        value="Lampiran berisi ringkasan invoice bulanan, rincian total item, serta catatan pendukung operasional.",
-                        key="report_appendix"
-                    )
+                    with st.expander("Lihat Narasi Otomatis", expanded=False):
+                        st.write(f"**Highlight:** {auto_narrative['highlight']}")
+                        st.write(f"**Isu Krusial:** {auto_narrative['critical_issue']}")
+                        st.write(f"**Analisis:** {auto_narrative['activity_analysis']}")
+                        st.write(f"**Masalah & Solusi:** {auto_narrative['problem_and_solution']}")
+                        st.write(f"**Rencana Bulan Depan:** {auto_narrative['next_plan']}")
+                        st.write(f"**Lampiran:** {auto_narrative['appendix_notes']}")
 
                     if st.button("Generate & Unduh Laporan Penjualan PDF", use_container_width=True):
                         report_payload = {
-                            'cover_title': cover_title,
-                            'author_name': author_name,
-                            'report_date': report_date.strftime('%d %B %Y'),
-                            'highlight': highlight,
-                            'critical_issue': critical_issue,
-                            'activity_analysis': activity_analysis,
-                            'problem_and_solution': problem_solution,
-                            'next_plan': next_plan,
-                            'appendix_notes': appendix_notes,
+                            'cover_title': f"Laporan Bulanan {report_base['title_month']}",
+                            'author_name': 'Sistem Otomatis BKA',
+                            'report_date': datetime.now().strftime('%d %B %Y'),
+                            'highlight': auto_narrative['highlight'],
+                            'critical_issue': auto_narrative['critical_issue'],
+                            'activity_analysis': auto_narrative['activity_analysis'],
+                            'problem_and_solution': auto_narrative['problem_and_solution'],
+                            'next_plan': auto_narrative['next_plan'],
+                            'appendix_notes': auto_narrative['appendix_notes'],
                             'metrics': metrics,
                             'kpi_table': kpi_table,
                             'transactions': report_base['transactions']

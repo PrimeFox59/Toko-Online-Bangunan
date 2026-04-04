@@ -17,47 +17,175 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .reportview-container {
-        background: #F0F2F6;
+    @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600&display=swap');
+
+    :root {
+        --pink-50: #fff4fa;
+        --pink-100: #ffe5f3;
+        --pink-300: #ffadd8;
+        --pink-500: #ff4fa3;
+        --pink-700: #c21874;
+        --white-soft: rgba(255, 255, 255, 0.72);
+        --glass-border: rgba(255, 255, 255, 0.58);
+        --text-strong: #5d1a45;
+        --text-muted: #92527a;
+        --shadow-soft: 0 16px 40px rgba(255, 79, 163, 0.18);
     }
+
+    .stApp {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        color: var(--text-strong);
+        background:
+            radial-gradient(circle at 12% 16%, rgba(255, 199, 230, 0.75) 0%, rgba(255, 199, 230, 0) 35%),
+            radial-gradient(circle at 85% 8%, rgba(255, 221, 240, 0.95) 0%, rgba(255, 221, 240, 0) 34%),
+            linear-gradient(130deg, #fff8fc 0%, #ffe8f5 45%, #fff1f9 100%);
+        min-height: 100vh;
+    }
+
+    [data-testid="stAppViewContainer"] {
+        background: transparent;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(255, 255, 255, 0.28);
+        backdrop-filter: blur(10px);
+    }
+
     .main .block-container {
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
+        padding-top: 1.15rem;
+        padding-bottom: 1.5rem;
+        padding-left: 1.4rem;
+        padding-right: 1.4rem;
     }
-    .st-emotion-cache-1r6509j {
-        background-color: #2F3E50;
+
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 244, 251, 0.3));
+        border-right: 1px solid var(--glass-border);
+        backdrop-filter: blur(16px);
     }
-    .st-emotion-cache-1r6509j .stButton>button {
-        color: white;
+
+    [data-testid="stSidebar"] > div:first-child {
+        background: transparent;
     }
-    .st-emotion-cache-1r6509j .stButton>button:hover {
-        background-color: #455A64;
-    }
-    .st-emotion-cache-1r6509j .st-bv {
-        color: white;
-    }
-    .st-emotion-cache-16k1w7m {
-        background-color: #2F3E50;
-    }
+
     h1, h2, h3, h4, h5, h6 {
-        color: #2F3E50;
+        font-family: 'Rajdhani', sans-serif;
+        color: var(--text-strong);
+        letter-spacing: 0.02em;
     }
-    .st-emotion-cache-1av5400 {
-        background-color: #FFFFFF;
-        padding: 2rem;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+
+    p, span, label, li {
+        color: var(--text-muted);
     }
-    .st-emotion-cache-1av5400 h3 {
-        color: #172B4D;
+
+    [data-testid="stForm"],
+    [data-testid="stExpander"],
+    [data-testid="stMetric"],
+    [data-testid="stDataFrame"],
+    [data-testid="stAlertContainer"],
+    .stTabs,
+    .stPlotlyChart,
+    div[data-baseweb="select"],
+    div[data-baseweb="input"] {
+        background: var(--white-soft);
+        border: 1px solid var(--glass-border);
+        border-radius: 18px;
+        box-shadow: var(--shadow-soft);
+        backdrop-filter: blur(14px);
     }
-    .st-emotion-cache-1av5400 .st-cc {
-        color: #172B4D;
+
+    [data-testid="stForm"] {
+        padding: 1rem;
     }
-    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
-        font-size: 1rem;
+
+    .stButton > button,
+    .stDownloadButton > button,
+    [data-testid="baseButton-secondary"] {
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        color: #fff;
+        font-weight: 600;
+        background: linear-gradient(135deg, #ff64af 0%, #ff3f9b 40%, #d6177f 100%);
+        box-shadow: 0 10px 22px rgba(255, 63, 155, 0.33);
+        transition: all 0.22s ease;
+    }
+
+    .stButton > button:hover,
+    .stDownloadButton > button:hover,
+    [data-testid="baseButton-secondary"]:hover {
+        transform: translateY(-1px) scale(1.01);
+        filter: brightness(1.06);
+        box-shadow: 0 14px 26px rgba(255, 63, 155, 0.38);
+    }
+
+    [data-testid="stSidebar"] .stButton > button {
+        width: 100%;
+        margin-bottom: 0.35rem;
+        background: linear-gradient(130deg, rgba(255, 98, 176, 0.88), rgba(212, 13, 121, 0.88));
+    }
+
+    [data-baseweb="tab-list"] {
+        gap: 0.45rem;
+        padding: 0.45rem;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.45);
+        border: 1px solid var(--glass-border);
+    }
+
+    [data-baseweb="tab"] {
+        border-radius: 12px;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+
+    [aria-selected="true"][data-baseweb="tab"] {
+        color: var(--pink-700);
+        background: rgba(255, 255, 255, 0.85);
+    }
+
+    input, textarea {
+        color: #6d2a54 !important;
+    }
+
+    .stMetric {
+        border-left: 4px solid var(--pink-500);
+    }
+
+    [data-testid="stMarkdownContainer"] hr {
+        border: 0;
+        border-top: 1px solid rgba(255, 79, 163, 0.25);
+    }
+
+    .glass-hero {
+        border-radius: 18px;
+        padding: 1rem 1.1rem;
+        margin-bottom: 0.8rem;
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(255, 238, 248, 0.58));
+        border: 1px solid var(--glass-border);
+        box-shadow: var(--shadow-soft);
+    }
+
+    .glass-hero h4 {
+        margin: 0;
+        font-size: 1.15rem;
+        color: #8c1f62;
+    }
+
+    .glass-hero p {
+        margin: 0.35rem 0 0 0;
+        font-size: 0.92rem;
+        color: #9b4c77;
+    }
+
+    @media (max-width: 900px) {
+        .main .block-container {
+            padding-left: 0.8rem;
+            padding-right: 0.8rem;
+        }
+
+        [data-testid="stForm"] {
+            padding: 0.75rem;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1479,6 +1607,15 @@ def show_payroll_page():
 # --- Login & Main App Logic ---
 def login_page():
     st.title("Login Sistem Kontrol Stok")
+    st.markdown(
+        """
+        <div class="glass-hero">
+            <h4>Smart Inventory Command Center</h4>
+            <p>Masuk untuk mengelola stok, transaksi, dan penggajian dengan antarmuka modern.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     with st.form("login_form"):
         st.subheader("Silakan Masuk")
         username = st.text_input("Nama Pengguna")
@@ -1501,6 +1638,15 @@ def main():
         st.session_state['page'] = 'Login'
     
     st.sidebar.title("PT. BERKAT KARYA ANUGERAH")
+    st.sidebar.markdown(
+        """
+        <div class="glass-hero">
+            <h4>Glass Mode</h4>
+            <p>Pink-White Hi-Tech Panel</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.sidebar.markdown("---")
 
     if st.session_state['logged_in']:

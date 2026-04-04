@@ -27,6 +27,11 @@ st.markdown("""
         --pink-300: #ffadd8;
         --pink-500: #ff4fa3;
         --pink-700: #c21874;
+        --neutral-100: #f8fafc;
+        --neutral-200: #eef2f7;
+        --neutral-300: #d8e0ea;
+        --neutral-700: #334155;
+        --neutral-900: #1e293b;
         --white-soft: rgba(255, 255, 255, 0.72);
         --glass-border: rgba(255, 255, 255, 0.58);
         --text-strong: #5d1a45;
@@ -61,13 +66,14 @@ st.markdown("""
     }
 
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 244, 251, 0.3));
-        border-right: 1px solid var(--glass-border);
-        backdrop-filter: blur(16px);
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+        border-right: 1px solid var(--neutral-300);
+        backdrop-filter: blur(8px);
     }
 
     [data-testid="stSidebar"] > div:first-child {
         background: transparent;
+        padding-top: 0.5rem;
     }
 
     h1, h2, h3, h4, h5, h6 {
@@ -122,8 +128,72 @@ st.markdown("""
 
     [data-testid="stSidebar"] .stButton > button {
         width: 100%;
-        margin-bottom: 0.35rem;
-        background: linear-gradient(130deg, rgba(255, 98, 176, 0.88), rgba(212, 13, 121, 0.88));
+        margin-bottom: 0.42rem;
+        min-height: 2.6rem;
+        border-radius: 12px;
+        background: #ffffff;
+        color: var(--neutral-700);
+        border: 1px solid var(--neutral-300);
+        box-shadow: 0 4px 14px rgba(148, 163, 184, 0.12);
+        font-weight: 600;
+        text-align: left;
+        padding-left: 0.8rem;
+    }
+
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background: #f8fbff;
+        color: var(--neutral-900);
+        border-color: #cbd5e1;
+        box-shadow: 0 8px 18px rgba(148, 163, 184, 0.2);
+        transform: translateY(-1px);
+        filter: none;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        color: #64748b;
+    }
+
+    .sidebar-brand {
+        border: 1px solid var(--neutral-300);
+        border-radius: 14px;
+        background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+        padding: 0.9rem 0.9rem;
+        margin: 0.15rem 0 0.75rem 0;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    .sidebar-brand h4 {
+        margin: 0;
+        color: var(--neutral-900);
+        font-size: 1.04rem;
+        letter-spacing: 0.01em;
+    }
+
+    .sidebar-brand p {
+        margin: 0.32rem 0 0 0;
+        color: #64748b;
+        font-size: 0.84rem;
+    }
+
+    .sidebar-role {
+        display: inline-block;
+        margin-top: 0.55rem;
+        padding: 0.25rem 0.55rem;
+        border-radius: 999px;
+        background: #f1f5f9;
+        color: #334155;
+        border: 1px solid #dbe4ee;
+        font-size: 0.73rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    .sidebar-section-title {
+        margin: 0.35rem 0 0.45rem 0;
+        color: #94a3b8;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.09em;
     }
 
     [data-baseweb="tab-list"] {
@@ -1991,17 +2061,19 @@ def main():
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
         st.session_state['page'] = 'Login'
-    
-    st.sidebar.title("PT. BERKAT KARYA ANUGERAH")
+
+    role_label = st.session_state.get('role', 'belum login')
     st.sidebar.markdown(
-        """
-        <div class="glass-hero">
-            <h4>Glass Mode</h4>
-            <p>Pink-White Hi-Tech Panel</p>
+        f"""
+        <div class="sidebar-brand">
+            <h4>PT. BERKAT KARYA ANUGERAH</h4>
+            <p>Sistem Kontrol Stok & Penggajian</p>
+            <span class="sidebar-role">{role_label}</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    st.sidebar.markdown("<p class='sidebar-section-title'>MENU NAVIGASI</p>", unsafe_allow_html=True)
     st.sidebar.markdown("---")
 
     if st.session_state['logged_in']:
